@@ -1,10 +1,11 @@
 import org.jetbrains.kotlin.gradle.tasks.KotlinCompile
 
 plugins {
-    // Kotlin JVM
-    kotlin("jvm") version "1.8.20"
+    // Kotlin JVM + плагин сериализации, обе версии 2.1.20
+    kotlin("jvm") version "2.1.20"
+    kotlin("plugin.serialization") version "2.1.20"
 
-    // Плагин Shadow Jar — собирает один‑единственный jar с кодом + зависимостями
+    // Shadow Jar (с 7.1.2 всё ок на Gradle 8.x)
     id("com.github.johnrengelman.shadow") version "7.1.2"
 
     application
@@ -15,29 +16,44 @@ version = "1.0-SNAPSHOT"
 
 repositories {
     mavenCentral()
-    maven("https://jitpack.io")       // нужен для kotlin‑telegram‑bot
+    maven("https://jitpack.io")       // для kotlin-telegram-bot
 }
 
 dependencies {
-    /* ──────────── Telegram‑бот ──────────── */
-    implementation("io.github.kotlin-telegram-bot.kotlin-telegram-bot:telegram:6.1.0")
 
-    /* ─────────────  OkHttp  ───────────── */
-    // 1) Подключаем BOM — «таблица» с одной версией для всех артефактов OkHttp
-    implementation(platform("com.squareup.okhttp3:okhttp-bom:4.12.0"))
+    implementation("org.jetbrains.exposed:exposed-core:0.50.1")
+    implementation("org.jetbrains.exposed:exposed-dao:0.50.1")
+    implementation("org.jetbrains.exposed:exposed-jdbc:0.50.1")
+    implementation("org.postgresql:postgresql:42.7.3")
+    implementation("com.zaxxer:HikariCP:5.1.0")
 
-    // 2) Нужные нам модули уже без версии
-    implementation("com.squareup.okhttp3:okhttp")
-    implementation("com.squareup.okhttp3:logging-interceptor")   // удобно для логирования запросов
+// корутины
+    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.8.1")
 
-    /* ─────────────  Прочее  ───────────── */
-    implementation("com.google.code.gson:gson:2.10")             // JSON
-    implementation("io.github.cdimascio:dotenv-kotlin:6.4.1")    // .env
+//    /* ──────────── Telegram-бот ──────────── */
+//    implementation("io.github.kotlin-telegram-bot.kotlin-telegram-bot:telegram:6.1.0")
+//
+//    /* ─────────────  OkHttp  ───────────── */
+//    implementation(platform("com.squareup.okhttp3:okhttp-bom:4.12.0"))
+//    implementation("com.squareup.okhttp3:okhttp")
+//    implementation("com.squareup.okhttp3:logging-interceptor")
+//
+//    /* ─────────────  Прочее  ───────────── */
+//    implementation("com.google.code.gson:gson:2.10")
+//    implementation("io.github.cdimascio:dotenv-kotlin:6.4.1")
+//
+//    /* ─────────────  Ktor + Coroutines  ───────────── */
+//    implementation("io.ktor:ktor-client-core:3.1.2")
+//    implementation("io.ktor:ktor-client-cio:3.1.2")
+//    implementation("io.ktor:ktor-client-content-negotiation:3.1.2")
+//    implementation("io.ktor:ktor-serialization-kotlinx-json:3.1.2")
+//
+//    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.10.2")
 
     testImplementation(kotlin("test"))
 }
 
-/* ───────────  Java 17 под Kotlin  ─────────── */
+/* ───────────  Java 17 под Kotlin  ─────────── */
 kotlin {
     jvmToolchain {
         languageVersion.set(JavaLanguageVersion.of(17))
@@ -46,24 +62,20 @@ kotlin {
 
 /* ─────────────  Точка входа  ───────────── */
 application {
-    // Если ваш файл main.kt лежит в пакете (например, package org.example),
-    // то здесь должно быть "org.example.MainKt"
+    // если main.kt без package:
     mainClass.set("MainKt")
 }
 
-/* ───────────  Shadow Jar настройки  ─────────── */
+/* ───────────  Shadow Jar  ─────────── */
 tasks {
     shadowJar {
-        archiveBaseName.set("BookingBot") // итоговый файл BookingBot.jar
+        archiveBaseName.set("BookingBot")
         archiveClassifier.set("")
-        mergeServiceFiles()               // склейка META-INF/services если потребуется
+        mergeServiceFiles()
     }
-
-    // При желании можно автоматически запускать shadowJar после сборки:
-    // build { dependsOn(shadowJar) }
 }
 
-/* ─────────  Доп. флаги для компилятора (опционально) ───────── */
+/* ─── Доп. флаг компилятора (опционально) ─── */
 tasks.withType<KotlinCompile>().configureEach {
     kotlinOptions.jvmTarget = "17"
 }

@@ -1,0 +1,42 @@
+services:
+  # --------------------  PostgreSQL  --------------------
+  db:
+    image: postgres:16
+    container_name: club-postgres
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      POSTGRES_DB:       "${POSTGRES_DB}"
+      POSTGRES_USER:     "${POSTGRES_USER}"
+      POSTGRES_PASSWORD: "${POSTGRES_PASSWORD}"
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # --------------------  Metabase  --------------------
+  metabase:
+    image: metabase/metabase:v0.54.5.4      # arm64-тег
+    platform: linux/arm64/v8                # просим arm-образ
+    container_name: club-metabase
+    restart: unless-stopped
+    user: "0:0"                             # root для прав записи
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      MB_DB_FILE: /metabase-data/metabase.db
+      JAVA_OPTS: "-Xms256m -Xmx512m"
+    ports:
+      - "3000:3000"
+    volumes:
+      - metabase-data:/metabase-data
+
+volumes:
+  pgdata:
+  metabase-data:
