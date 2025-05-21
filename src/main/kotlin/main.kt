@@ -1,42 +1,44 @@
-import db.Booking
-import db.BookingStatus
-import db.BookingsRepoImpl
-import db.DatabaseFactory
-import db.TablesRepoImpl
-import db.UsersRepoImpl
+import bot.TelegramBotFacade
+import com.github.kotlintelegrambot.Bot
+import com.github.kotlintelegrambot.bot
+import com.github.kotlintelegrambot.UpdatesListener
+import db.*
+import fsm.*
+import kotlinx.coroutines.runBlocking
+import com.github.kotlintelegrambot.entities.Update      // + этот
 
-fun main() {
+suspend fun main() {
+    /* 1. init DB (как было) */
     DatabaseFactory.init(
-        host = System.getenv("POSTGRES_HOST") ?: "localhost",
-        port = System.getenv("POSTGRES_PORT")?.toInt() ?: 5432,
-        dbName = System.getenv("POSTGRES_DB") ?: "clubdb",
-        user = System.getenv("POSTGRES_USER") ?: "clubadmin",
-        password = System.getenv("POSTGRES_PASSWORD") ?: "supersecret"
+        host     = System.getenv("POSTGRES_HOST") ?: "localhost",
+        port     = 5432,
+        dbName   = "clubdb",
+        user     = "clubadmin",
+        password = "supersecret"
     )
-    suspend fun quickTest() {
-        val usersRepo = UsersRepoImpl()
-        val tablesRepo = TablesRepoImpl()
-        val bookingsRepo = BookingsRepoImpl()
 
-        val user = usersRepo.getOrCreate(telegramId = 12345678L,
-            firstName = "Ivan", lastName = null, username = "ivan77")
-
-        val tables = tablesRepo.listByClub(clubId = 1)
-        val bookingId = bookingsRepo.create(
-            Booking(
-                id = 0, clubId = 1, tableId = tables.first().id,
-                userId = user.id, guestsCount = 4,
-                dateStart = kotlinx.datetime.Clock.System.now(),
-                dateEnd = kotlinx.datetime.Clock.System.now().plus(7200, kotlinx.datetime.DateTimeUnit.SECOND),
-                status = BookingStatus.NEW, comment = null,
-                createdAt = kotlinx.datetime.Clock.System.now()
-            )
-        )
-        println("Created booking $bookingId")
+    /* 2. create telegram bot */
+    val telegramBot: Bot = bot {
+        token = System.getenv("TELEGRAM_BOT_TOKEN")
     }
-}
 
+    /* 3. deps for FSM */
+    val deps = BookingDeps(
+        bot          = TelegramBotFacade(telegramBot),
+        tablesRepo   = TablesRepoImpl(),
+        bookingsRepo = BookingsRepoImpl(),
+    )
+    val handler = BookingHandler(deps)
 
+    /* 4. listen updates */
+    telegramBot.setUpdatesListener { updates: List<Update> ->   // явный тип
+        updates.forEach { update ->
+            runBlocking { handler.handle(update) }              // suspend-обработчик
+        }
+        UpdatesListener.Confirmation.CONFIRMED_UPDATES_ALL
+    }
+
+    telegramBot.startPolling()}
 
 
 

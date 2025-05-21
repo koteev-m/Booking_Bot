@@ -1,7 +1,6 @@
 package db
 
-import kotlinx.datetime.Instant
-import kotlin.time.Instant
+import java.time.Instant
 
 data class Club(
     val id: Int,
