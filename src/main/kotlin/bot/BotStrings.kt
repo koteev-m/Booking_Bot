@@ -3,6 +3,7 @@ package bot
 import java.time.Month
 import java.time.format.TextStyle
 import java.util.Locale
+import db.BookingStatus
 
 // Интерфейс для строк, чтобы легко добавлять новые языки
 interface LocalizedStrings {
@@ -109,6 +110,10 @@ interface LocalizedStrings {
     val calendarNextMonth: String
     fun calendarMonthYear(month: Month, year: Int): String // Takes java.time.Month
     val weekdaysShort: List<String> // Пн, Вт, Ср...
+
+    fun chooseTablePromptForClubAndDate(clubTitle: String, formattedDate: String): String // Новая строка
+    val notApplicable: String // Новая строка (для случаев, когда данные отсутствуют)
+    fun bookingStatusToText(status: BookingStatus): String // Новая строка (для отображения статуса)
 }
 
 object RussianStrings : LocalizedStrings {
@@ -223,6 +228,19 @@ object RussianStrings : LocalizedStrings {
         return "${month.getDisplayName(TextStyle.FULL_STANDALONE, Locale("ru"))} $year"
     }
     override val weekdaysShort = listOf("Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс")
+
+    override fun chooseTablePromptForClubAndDate(clubTitle: String, formattedDate: String) = "Выберите стол в клубе \"$clubTitle\" на $formattedDate:"
+    override val notApplicable = "Н/Д" // Неприменимо или нет данных
+    override fun bookingStatusToText(status: BookingStatus): String {
+        return when (status) {
+            BookingStatus.NEW -> "Новая"
+            BookingStatus.CONFIRMED -> "Подтверждена"
+            BookingStatus.CANCELLED -> "Отменена"
+            BookingStatus.COMPLETED -> "Завершена"
+            BookingStatus.AWAITING_FEEDBACK -> "Ожидает отзыва"
+            BookingStatus.ARCHIVED -> "Архивирована"
+        }
+    }
 }
 
 object EnglishStrings : LocalizedStrings {
@@ -335,6 +353,19 @@ object EnglishStrings : LocalizedStrings {
         return "${month.getDisplayName(TextStyle.FULL_STANDALONE, Locale.ENGLISH)} $year"
     }
     override val weekdaysShort = listOf("Mo", "Tu", "We", "Th", "Fr", "Sa", "Su")
+
+    override fun chooseTablePromptForClubAndDate(clubTitle: String, formattedDate: String) = "Select a table at \"$clubTitle\" for $formattedDate:"
+    override val notApplicable = "N/A" // Not Applicable or No Data
+    override fun bookingStatusToText(status: BookingStatus): String {
+        return when (status) {
+            BookingStatus.NEW -> "New"
+            BookingStatus.CONFIRMED -> "Confirmed"
+            BookingStatus.CANCELLED -> "Cancelled"
+            BookingStatus.COMPLETED -> "Completed"
+            BookingStatus.AWAITING_FEEDBACK -> "Awaiting Feedback"
+            BookingStatus.ARCHIVED -> "Archived"
+        }
+    }
 }
 
 object StringProviderFactory {

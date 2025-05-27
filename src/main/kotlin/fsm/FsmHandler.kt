@@ -11,12 +11,13 @@ import com.github.kotlintelegrambot.entities.ChatId
 import com.github.kotlintelegrambot.entities.Update
 import db.ClubsRepo
 import jdk.jfr.internal.consumer.EventLog.start
-import ru.nsk.kstatemachine.StateMachine
+import ru.nsk.kstatemachine.*
 import java.time.Instant
 import java.time.LocalDate
 import java.time.YearMonth
 import java.time.format.DateTimeParseException
 import org.slf4j.LoggerFactory
+import ru.nsk.kstatemachine.statemachine.StateMachine
 
 class FsmHandler(
     private val deps: FsmDeps
