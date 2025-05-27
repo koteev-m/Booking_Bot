@@ -8,6 +8,10 @@ object BotConstants {
     const val MAX_GUESTS_DEFAULT = 20 // Максимальное количество гостей по умолчанию
     const val MIN_GUESTS_DEFAULT = 1  // Минимальное количество гостей
 
+    // Добавлено для TelegramBotFacadeImpl
+    const val MAX_CLUBS_ON_MAIN_MENU_KEYBOARD = 2
+    const val CALENDAR_MONTHS_AHEAD_LIMIT = 3 // Например, показывать календарь на 3 месяца вперед
+
     // Callback Data Prefixes - должны быть языконезависимыми
     const val CB_PREFIX_SELECT_LANG = "select_lang:"
     const val CB_PREFIX_BOOK_CLUB = "book_club:"
@@ -32,13 +36,11 @@ object BotConstants {
     const val CB_MAIN_MENU_VENUE_INFO = "main_menu_venue_info"
     const val CB_MAIN_MENU_MY_BOOKINGS = "main_menu_my_bookings"
     const val CB_MAIN_MENU_ASK_QUESTION = "main_menu_ask_question"
-    const val CB_MAIN_MENU_OPEN_APP = "main_menu_open_app"
+    const val CB_MAIN_MENU_OPEN_APP = "main_menu_open_app" // Пока не используется активно
     const val CB_MAIN_MENU_HELP = "main_menu_help"
     const val CB_MAIN_MENU_CHANGE_LANG = "main_menu_change_lang"
 
-    // Placeholder for table layout image. Replace with actual URLs or a dynamic generation mechanism.
-    const val TABLE_LAYOUT_PLACEHOLDER_URL = "[https://placehold.co/600x400/E0E0E0/555555?text=Floor+Plan%0A(Table+Numbers+Here](https://placehold.co/600x400/E0E0E0/555555?text=Floor+Plan%0A(Table+Numbers+Here))"
-    // Loyalty points constants
-    const val POINTS_PER_GUEST = 10 // Example: 10 points per guest for booking
-    const val POINTS_FOR_FEEDBACK = 50 // Example: 50 points for leaving feedback
+    const val TABLE_LAYOUT_PLACEHOLDER_URL = "https://placehold.co/600x400/E0E0E0/555555?text=Floor+Plan%0A(Table+Numbers+Here)"
+    const val POINTS_PER_GUEST = 10
+    const val POINTS_FOR_FEEDBACK = 50
 }
