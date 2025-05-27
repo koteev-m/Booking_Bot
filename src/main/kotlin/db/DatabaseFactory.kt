@@ -1,10 +1,10 @@
-package db // Corrected package
+package db
 
 import com.zaxxer.hikari.HikariConfig
 import com.zaxxer.hikari.HikariDataSource
 import org.jetbrains.exposed.sql.Database
-import org.jetbrains.exposed.sql.SchemaUtils
-import org.jetbrains.exposed.sql.transactions.transaction
+// import org.jetbrains.exposed.sql.SchemaUtils // Removed to avoid conflict with Flyway
+// import org.jetbrains.exposed.sql.transactions.transaction // Removed if not used after SchemaUtils removal
 import org.slf4j.LoggerFactory
 
 object DatabaseFactory {
@@ -32,6 +32,9 @@ object DatabaseFactory {
             Database.connect(dataSource)
             logger.info("Database connection pool established.")
 
+            // Flyway will handle schema creation and migration.
+            // SchemaUtils.createMissingTablesAndColumns should not be used with Flyway.
+            /*
             transaction {
                 // addLogger(StdOutSqlLogger) // Uncomment for SQL query logging during development
                 SchemaUtils.createMissingTablesAndColumns(
@@ -39,9 +42,8 @@ object DatabaseFactory {
                     // Add other tables here if any
                 )
                 logger.info("Database tables checked/created if missing.")
-                // Seeding initial data should ideally be done via a migration tool or separate script
-                // For simplicity in this example, it's omitted.
             }
+            */
         } catch (e: Exception) {
             logger.error("FATAL: Failed to initialize database: ${e.message}", e)
             throw e // Re-throw to halt application if DB initialization fails
