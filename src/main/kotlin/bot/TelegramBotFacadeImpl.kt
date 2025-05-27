@@ -1,7 +1,7 @@
 package bot
 
-import Club
-import LocalizedStrings
+import db.Club
+import bot.LocalizedStrings
 import com.github.kotlintelegrambot.Bot
 import com.github.kotlintelegrambot.entities.ChatId
 import com.github.kotlintelegrambot.entities.InlineKeyboardMarkup

@@ -1,6 +1,6 @@
 package fsm
 
-import StringProviderFactory
+import bot.StringProviderFactory
 import bot.BotConstants
 import kotlinx.coroutines.CoroutineName
 import kotlinx.coroutines.CoroutineScope

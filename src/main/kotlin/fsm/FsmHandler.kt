@@ -1,6 +1,6 @@
 package fsm
 
-import LocalizedStrings
+import bot.LocalizedStrings
 import bot.BotConstants
 import bot.StringProviderFactory
 import bot.chatId
