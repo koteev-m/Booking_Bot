@@ -1,47 +1,132 @@
-import bot.TelegramBotFacade
-import com.github.kotlintelegrambot.Bot
+package bot
+
+import db.ClubsRepoImpl
+import db.TablesRepoImpl
 import com.github.kotlintelegrambot.bot
-import com.github.kotlintelegrambot.UpdatesListener
-import db.*
-import fsm.*
-import kotlinx.coroutines.runBlocking
-import com.github.kotlintelegrambot.entities.Update      // + этот
+import com.github.kotlintelegrambot.logging.LogLevel as TelegramLogLevel
+import db.BookingsRepoImpl
+import db.UsersRepoImpl
+import fsm.FsmDeps
+import fsm.FsmHandler
+import org.flywaydb.core.Flyway
+import org.jetbrains.exposed.sql.Database
+import java.time.ZoneId
+import java.util.concurrent.TimeUnit
+import kotlinx.coroutines.*
+import org.slf4j.Logger
+import org.slf4j.LoggerFactory
+
+val appCoroutineScope = CoroutineScope(Dispatchers.Default + SupervisorJob())
+val logger: Logger = LoggerFactory.getLogger("com.example.bot.Main")
+
+fun migrateDatabase(jdbcUrl: String, user: String, password: String) {
+    logger.info("Running database migrations via Flyway...")
+    val flyway = Flyway.configure()
+        .dataSource(jdbcUrl, user, password)
+        .locations("classpath:db/migration")
+        .load()
+    flyway.migrate()
+    logger.info("Database migration complete!")
+}
 
 suspend fun main() {
-    /* 1. init DB (как было) */
-    DatabaseFactory.init(
-        host     = System.getenv("POSTGRES_HOST") ?: "localhost",
-        port     = 5432,
-        dbName   = "clubdb",
-        user     = "clubadmin",
-        password = "supersecret"
-    )
+    logger.info("==============================================")
+    logger.info("Starting Telegram Bot Application...")
+    logger.info("Version: ${System.getenv("APP_VERSION") ?: "N/A"}")
+    logger.info("==============================================")
 
-    /* 2. create telegram bot */
-    val telegramBot: Bot = bot {
-        token = System.getenv("TELEGRAM_BOT_TOKEN")
+    // Чтение настроек из ENV
+    val botToken = System.getenv("TELEGRAM_BOT_TOKEN") ?: run {
+        logger.error("FATAL: TELEGRAM_BOT_TOKEN not set in environment variables!")
+        kotlin.system.exitProcess(1)
+    }
+    val dbHost = System.getenv("POSTGRES_HOST") ?: "localhost"
+    val dbPort = System.getenv("POSTGRES_PORT")?.toIntOrNull() ?: 5432
+    val dbName = System.getenv("POSTGRES_DB") ?: "club_booking_bot_db_v2"
+    val dbUser = System.getenv("POSTGRES_USER") ?: "clubadmin"
+    val dbPassword = System.getenv("POSTGRES_PASSWORD") ?: "supersecret"
+    val defaultTimeZoneStr = System.getenv("DEFAULT_TIMEZONE") ?: "Europe/Moscow"
+    val defaultTimeZone = try { ZoneId.of(defaultTimeZoneStr) } catch (e: Exception) {
+        logger.warn("Invalid DEFAULT_TIMEZONE '$defaultTimeZoneStr', defaulting to Europe/Moscow. Error: ${e.message}")
+        ZoneId.of("Europe/Moscow")
+    }
+    val telegramLogLevelEnv = System.getenv("TELEGRAM_LOG_LEVEL") ?: "Error"
+    val telegramLogLevel = try {
+        TelegramLogLevel.valueOf(telegramLogLevelEnv.uppercase())
+    } catch (e: IllegalArgumentException) {
+        logger.warn("Invalid TELEGRAM_LOG_LEVEL '$telegramLogLevelEnv', defaulting to Error.")
+        TelegramLogLevel.Error
     }
 
-    /* 3. deps for FSM */
-    val deps = BookingDeps(
-        bot          = TelegramBotFacade(telegramBot),
-        tablesRepo   = TablesRepoImpl(),
-        bookingsRepo = BookingsRepoImpl(),
-    )
-    val handler = BookingHandler(deps)
+    logger.info("Configuration: DB_HOST=$dbHost, DB_PORT=$dbPort, DB_NAME=$dbName, DEFAULT_TIMEZONE=$defaultTimeZone, TELEGRAM_LOG_LEVEL=$telegramLogLevel")
 
-    /* 4. listen updates */
-    telegramBot.setUpdatesListener { updates: List<Update> ->   // явный тип
-        updates.forEach { update ->
-            runBlocking { handler.handle(update) }              // suspend-обработчик
+    // JDBC URL для Flyway и Exposed
+    val jdbcUrl = "jdbc:postgresql://$dbHost:$dbPort/$dbName"
+
+    // === 1. Миграции Flyway ===
+    migrateDatabase(jdbcUrl, dbUser, dbPassword)
+
+    // === 2. Инициализация Exposed ===
+    Database.connect(jdbcUrl, driver = "org.postgresql.Driver", user = dbUser, password = dbPassword)
+    logger.info("Database (Exposed) connected.")
+
+    // === 3. Telegram Bot ===
+    val telegramBot = bot {
+        this.token = botToken
+        this.logLevel = telegramLogLevel
+        this.dispatchTimeout = TimeUnit.SECONDS.toMillis(60)
+    }
+    logger.info("Telegram bot instance configured.")
+
+    // === 4. Репозитории и зависимости FSM ===
+    val bookingsRepo = BookingsRepoImpl()
+    val usersRepo = UsersRepoImpl()
+    val clubsRepo = ClubsRepoImpl()
+    val tablesRepo = TablesRepoImpl(bookingsRepo)
+
+    val botFacade = TelegramBotFacadeImpl(telegramBot, defaultTimeZone)
+    val fsmDeps = FsmDeps(botFacade, usersRepo, clubsRepo, tablesRepo, bookingsRepo, defaultTimeZone)
+    val fsmHandler = FsmHandler(fsmDeps)
+    logger.info("FSM dependencies and handler initialized.")
+
+    // === 5. Updates Listener (обработка событий Telegram) ===
+    telegramBot.setUpdatesListener(
+        onError = { error ->
+            logger.error("Telegram updates listener polling error: ${error.message}", error.exception)
+        },
+        onUpdate = { updates ->
+            updates.forEach { update ->
+                appCoroutineScope.launch(CoroutineName("UpdateHandler-${update.updateId}")) {
+                    val updateIdForLog = update.updateId
+                    try {
+                        logger.debug("Received update (ID: {})", updateIdForLog)
+                        fsmHandler.handleUpdate(update)
+                    } catch (e: Throwable) {
+                        logger.error("Critical unhandled error during update (ID: $updateIdForLog) processing: ${e.message}", e)
+                        update.message?.chat?.id?.let { chatIdVal ->
+                            val chatId = com.github.kotlintelegrambot.entities.ChatId.fromId(chatIdVal)
+                            val langCode = try { usersRepo.findById(update.userId!!.toInt())?.languageCode } catch (_: Exception) { null }
+                            val errorStrings = StringProviderFactory.get(langCode)
+                            val clubsForMenu = try { clubsRepo.getAllClubs(activeOnly = true) } catch (_: Exception) { emptyList() }
+                            launch(CoroutineName("ErrorNotifier-${update.updateId}")) {
+                                botFacade.sendErrorMessage(chatId, errorStrings, null, clubsForMenu)
+                            }
+                        }
+                    }
+                }
+            }
         }
-        UpdatesListener.Confirmation.CONFIRMED_UPDATES_ALL
+    )
+
+    // === 6. Стартуем бота ===
+    try {
+        telegramBot.startPolling()
+        logger.info("Bot started polling for updates successfully. Bot is operational on $defaultTimeZone.")
+    } catch (e: Exception) {
+        logger.error("FATAL: Failed to start Telegram polling: ${e.message}", e)
+        kotlin.system.exitProcess(1)
     }
-
-    telegramBot.startPolling()}
-
-
-
+}
 
 
 

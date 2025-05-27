@@ -1,38 +1,50 @@
-package db
+package db // Corrected package
 
 import com.zaxxer.hikari.HikariConfig
 import com.zaxxer.hikari.HikariDataSource
-import kotlinx.coroutines.Dispatchers
 import org.jetbrains.exposed.sql.Database
-import org.jetbrains.exposed.sql.transactions.experimental.newSuspendedTransaction
+import org.jetbrains.exposed.sql.SchemaUtils
 import org.jetbrains.exposed.sql.transactions.transaction
-import java.util.Properties
+import org.slf4j.LoggerFactory
 
 object DatabaseFactory {
+    private val logger = LoggerFactory.getLogger(DatabaseFactory::class.java)
 
-    fun init(
-        host: String,
-        port: Int,
-        dbName: String,
-        user: String,
-        password: String,
-    ) {
+    fun init(host: String, port: Int, dbName: String, user: String, password: String) {
+        logger.info("Initializing database connection to postgresql://$user@$host:$port/$dbName")
         val jdbcUrl = "jdbc:postgresql://$host:$port/$dbName"
         val config = HikariConfig().apply {
-            driverClassName = "org.postgresql.Driver"
-            username = user
+            this.driverClassName = "org.postgresql.Driver"
+            this.jdbcUrl = jdbcUrl
+            this.username = user
             this.password = password
-            maximumPoolSize = 10
-            isAutoCommit = false
+            this.maximumPoolSize = System.getenv("DB_MAX_POOL_SIZE")?.toIntOrNull() ?: 10
+            this.isAutoCommit = false // Exposed manages transactions
+            this.transactionIsolation = "TRANSACTION_REPEATABLE_READ" // Recommended for Exposed
+            this.connectionTimeout = System.getenv("DB_CONNECTION_TIMEOUT_MS")?.toLongOrNull() ?: 30000
+            this.idleTimeout = System.getenv("DB_IDLE_TIMEOUT_MS")?.toLongOrNull() ?: 600000
+            this.maxLifetime = System.getenv("DB_MAX_LIFETIME_MS")?.toLongOrNull() ?: 1800000
+            this.validationTimeout = System.getenv("DB_VALIDATION_TIMEOUT_MS")?.toLongOrNull() ?: 5000
             validate()
         }
-        Database.connect(HikariDataSource(config))
+        try {
+            val dataSource = HikariDataSource(config)
+            Database.connect(dataSource)
+            logger.info("Database connection pool established.")
+
+            transaction {
+                // addLogger(StdOutSqlLogger) // Uncomment for SQL query logging during development
+                SchemaUtils.createMissingTablesAndColumns(
+                    UsersTable, ClubsTable, TablesTable, BookingsTable
+                    // Add other tables here if any
+                )
+                logger.info("Database tables checked/created if missing.")
+                // Seeding initial data should ideally be done via a migration tool or separate script
+                // For simplicity in this example, it's omitted.
+            }
+        } catch (e: Exception) {
+            logger.error("FATAL: Failed to initialize database: ${e.message}", e)
+            throw e // Re-throw to halt application if DB initialization fails
+        }
     }
-
-    /** Синхронная транзакция (только для миграций/скриптов) */
-    fun <T> tx(block: () -> T): T = transaction { block() }
-
-    /** Suspend-транзакция для корутин */
-    suspend fun <T> suspendingTx(block: suspend () -> T): T =
-        newSuspendedTransaction(Dispatchers.IO) { block() }
 }
