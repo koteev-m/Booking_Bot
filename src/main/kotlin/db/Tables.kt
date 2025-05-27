@@ -1,55 +1,62 @@
 package db
 
-import org.jetbrains.exposed.sql.Table
-import org.jetbrains.exposed.sql.javatime.timestamp          // ← java-time
+import org.jetbrains.exposed.dao.id.IntIdTable
+import org.jetbrains.exposed.sql.javatime.timestamp
+import java.time.Instant
+import bot.BotConstants
 
-
-/* ---------- Clubs ---------- */
-object ClubsTable : Table("clubs") {
-    val id        = integer("id").autoIncrement()
-    val code      = text("code")
-    val title     = text("title")
-    val timezone  = text("timezone")
-    val createdAt = timestamp("created_at")
-    override val primaryKey = PrimaryKey(id)
+object UsersTable : IntIdTable("users") {
+    val telegramId = long("telegram_id").uniqueIndex()
+    val firstName = text("first_name").nullable()
+    val lastName = text("last_name").nullable()
+    val username = text("username").nullable()
+    val phone = text("phone").nullable()
+    val languageCode = varchar("language_code", 5).default(BotConstants.DEFAULT_LANGUAGE_CODE)
+    val loyaltyPoints = integer("loyalty_points").default(0)
+    val createdAt = timestamp("created_at").clientDefault { Instant.now() }
+    val lastActivityAt = timestamp("last_activity_at").clientDefault { Instant.now() }
 }
 
-/* ---------- Tables ---------- */
-object TablesTable : Table("tables") {
-    val id       = integer("id").autoIncrement()
-    val clubId   = integer("club_id").references(ClubsTable.id)
-    val number   = integer("number")
-    val seats    = integer("seats")
+object ClubsTable : IntIdTable("clubs") {
+    val code = text("code").uniqueIndex()
+    val title = text("title")
+    val description = text("description").nullable()
+    val address = text("address").nullable()
+    val phone = text("club_phone").nullable() // Renamed to avoid conflict if User has phone
+    val workingHours = text("working_hours").nullable()
+    val timezone = text("timezone").default("Europe/Moscow")
     val photoUrl = text("photo_url").nullable()
-    val isActive = bool("is_active")
-    override val primaryKey = PrimaryKey(id)
+    val floorPlanImageUrl = text("floor_plan_image_url").nullable()
+    val isActive = bool("is_active").default(true)
+    val createdAt = timestamp("created_at").clientDefault { Instant.now() }
 }
 
-/* ---------- Users ---------- */
-object UsersTable : Table("users") {
-    val id         = integer("id").autoIncrement()
-    val telegramId = long("telegram_id")
-    val firstName  = text("first_name").nullable()
-    val lastName   = text("last_name").nullable()
-    val username   = text("username").nullable()
-    val phone      = text("phone").nullable()
-    val createdAt  = timestamp("created_at")
-    override val primaryKey = PrimaryKey(id)
+object TablesTable : IntIdTable("tables") {
+    val clubId = reference("club_id", ClubsTable)
+    val number = integer("number") // User-visible table number
+    val seats = integer("seats")
+    val description = text("description").nullable()
+    val posX = integer("pos_x").nullable() // For floor plan visualization
+    val posY = integer("pos_y").nullable() // For floor plan visualization
+    val photoUrl = text("photo_url").nullable()
+    val isActive = bool("is_active").default(true)
+    init { uniqueIndex(clubId, number) } // Ensures table number is unique within a club
 }
 
-/* ---------- Bookings ---------- */
-enum class BookingStatus { NEW, CONFIRMED, CANCELLED }
-
-object BookingsTable : Table("bookings") {
-    val id          = integer("id").autoIncrement()
-    val clubId      = integer("club_id").references(ClubsTable.id)
-    val tableId     = integer("table_id").references(TablesTable.id)
-    val userId      = integer("user_id").references(UsersTable.id).nullable()
+object BookingsTable : IntIdTable("bookings") {
+    val clubId = reference("club_id", ClubsTable)
+    val tableId = reference("table_id", TablesTable)
+    val userId = reference("user_id", UsersTable)
     val guestsCount = integer("guests_count")
-    val dateStart   = timestamp("date_start")
-    val dateEnd     = timestamp("date_end")
-    val status      = enumerationByName("status", 10, BookingStatus::class)
-    val comment     = text("comment").nullable()
-    val createdAt   = timestamp("created_at")
-    override val primaryKey = PrimaryKey(id)
+    val dateStart = timestamp("date_start")
+    val dateEnd = timestamp("date_end")
+    val status = enumerationByName("status", 20, BookingStatus::class).default(BookingStatus.NEW)
+    val comment = text("comment").nullable()
+    val guestName = text("guest_name").nullable()
+    val guestPhone = text("guest_phone").nullable()
+    val loyaltyPointsEarned = integer("loyalty_points_earned").nullable()
+    val feedbackRating = integer("feedback_rating").nullable()
+    val feedbackComment = text("feedback_comment").nullable()
+    val createdAt = timestamp("created_at").clientDefault { Instant.now() }
+    val updatedAt = timestamp("updated_at").nullable() // Automatically updated by DB trigger or manually
 }
