@@ -1,4 +1,4 @@
-package bot
+package bot.facade
 
 import com.github.kotlintelegrambot.entities.ChatId
 import com.github.kotlintelegrambot.entities.Update

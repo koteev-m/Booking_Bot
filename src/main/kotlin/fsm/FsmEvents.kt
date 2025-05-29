@@ -1,7 +1,7 @@
 package fsm
 
 import com.github.kotlintelegrambot.entities.ChatId
-import bot.LocalizedStrings
+import bot.facade.LocalizedStrings
 import java.time.Instant
 import java.time.LocalDate
 import java.time.YearMonth

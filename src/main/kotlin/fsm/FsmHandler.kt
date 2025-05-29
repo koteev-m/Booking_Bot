@@ -1,15 +1,15 @@
 package fsm
 
-import bot.LocalizedStrings
-import bot.BotConstants
-import bot.StringProviderFactory
-import bot.chatId
-import bot.userId
-import bot.userLanguageCode
-import bot.userName
+import bot.facade.LocalizedStrings
+import bot.facade.BotConstants
+import bot.facade.StringProviderFactory
+import bot.facade.chatId
+import bot.facade.userId
+import bot.facade.userLanguageCode
+import bot.facade.userName
 import com.github.kotlintelegrambot.entities.ChatId
 import com.github.kotlintelegrambot.entities.Update
-import db.ClubsRepo
+import db.repositaries.ClubsRepo
 import jdk.jfr.internal.consumer.EventLog.start
 import ru.nsk.kstatemachine.*
 import java.time.Instant

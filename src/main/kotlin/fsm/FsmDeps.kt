@@ -1,9 +1,9 @@
 package fsm
 
-import db.BookingsRepo
-import db.ClubsRepo
-import db.TablesRepo
-import db.UsersRepo
+import db.repositaries.BookingsRepo
+import db.repositaries.ClubsRepo
+import db.repositaries.TablesRepo
+import db.repositaries.UsersRepo
 import java.time.ZoneId
 
 
