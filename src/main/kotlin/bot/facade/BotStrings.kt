@@ -1,9 +1,10 @@
-package bot
+package bot.facade
 
 import java.time.Month
 import java.time.format.TextStyle
 import java.util.Locale
 import db.BookingStatus
+import kotlin.collections.get
 
 // Интерфейс для строк, чтобы легко добавлять новые языки
 interface LocalizedStrings {

@@ -1,17 +1,20 @@
-package db
+package db.repositaries
 
+import db.Club
+import db.repositaries.ClubsTable
 import org.jetbrains.exposed.sql.ResultRow
 import org.jetbrains.exposed.sql.select
 import org.jetbrains.exposed.sql.selectAll
 
 class ClubsRepoImpl : ClubsRepo {
     override suspend fun getAllClubs(activeOnly: Boolean): List<Club> = dbQuery {
-        val query = if (activeOnly) ClubsTable.select { ClubsTable.isActive eq true } else ClubsTable.selectAll()
+        val query =
+            if (activeOnly) db.ClubsTable.select { db.ClubsTable.isActive eq true } else db.ClubsTable.selectAll()
         query.map { it.toClub() }
     }
 
     override suspend fun findById(id: Int): Club? = dbQuery {
-        ClubsTable.select { ClubsTable.id eq id }
+        db.ClubsTable.select { db.ClubsTable.id eq id }
             .singleOrNull()
             ?.toClub()
     }

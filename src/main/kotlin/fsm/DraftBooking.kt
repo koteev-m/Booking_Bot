@@ -1,6 +1,6 @@
 package fsm
 
-import bot.BotConstants
+import bot.facade.BotConstants
 import db.Booking
 import db.BookingStatus
 import db.Club

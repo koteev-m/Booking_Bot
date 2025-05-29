@@ -1,9 +1,7 @@
-package bot
+package bot.facade
 
-import com.github.kotlintelegrambot.entities.Update
-import com.github.kotlintelegrambot.entities.Message
-import com.github.kotlintelegrambot.entities.CallbackQuery
 import com.github.kotlintelegrambot.entities.ChatId
+import com.github.kotlintelegrambot.entities.Update
 
 sealed interface BotEvent {
     data class CommandEvent(val chatId: ChatId, val command: String) : BotEvent

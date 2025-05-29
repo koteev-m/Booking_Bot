@@ -1,4 +1,4 @@
-package bot
+package bot.facade
 
 object BotConstants {
     const val DEFAULT_LANGUAGE_CODE = "ru" // Русский по умолчанию

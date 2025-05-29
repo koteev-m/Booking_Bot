@@ -1,7 +1,8 @@
 package fsm
 
-import bot.StringProviderFactory //
-import bot.BotConstants //
+import bot.facade.StringProviderFactory //
+import bot.facade.BotConstants //
+import bot.facade.LocalizedStrings
 import com.github.kotlintelegrambot.entities.ChatId // For logging context
 import db.BookingStatus // Added import for BookingStatus
 import kotlinx.coroutines.CoroutineName //
@@ -13,7 +14,6 @@ import org.slf4j.LoggerFactory //
 import ru.nsk.kstatemachine.* //
 import ru.nsk.kstatemachine.coroutines.CoroutinesLibCoroutineAbstraction //
 import ru.nsk.kstatemachine.state.ChildMode
-import java.time.Instant //
 import java.time.YearMonth //
 import java.time.ZoneId // Added import
 import java.time.temporal.ChronoUnit //
@@ -28,7 +28,7 @@ fun buildBookingFsm( //
     chatIdForLog: ChatId, //
     telegramUserIdForLog: Long, //
     userNameForLog: String?, //
-    initialStrings: bot.LocalizedStrings //
+    initialStrings: LocalizedStrings //
 ) = createStateMachine( //
     name = "MainFSM-${chatIdForLog.id}-${telegramUserIdForLog}", //
     childMode = ChildMode.EXCLUSIVE, //

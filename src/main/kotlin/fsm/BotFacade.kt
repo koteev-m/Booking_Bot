@@ -1,6 +1,6 @@
 package fsm
 
-import bot.LocalizedStrings
+import bot.facade.LocalizedStrings
 import com.github.kotlintelegrambot.entities.ChatId
 import com.github.kotlintelegrambot.entities.InlineKeyboardMarkup // Added missing import
 import db.BookingWithClubName

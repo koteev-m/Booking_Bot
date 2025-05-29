@@ -1,24 +1,23 @@
-package bot
+package bot.facade
 
-import db.BookingStatus // Импорт для BookingStatus
-import db.Club
-import db.TableInfo
-import db.BookingWithClubName
-import fsm.DraftBooking
-import bot.LocalizedStrings
-import bot.StringProviderFactory
 import com.github.kotlintelegrambot.Bot
 import com.github.kotlintelegrambot.entities.ChatId
 import com.github.kotlintelegrambot.entities.InlineKeyboardMarkup
 import com.github.kotlintelegrambot.entities.KeyboardReplyMarkup
+import com.github.kotlintelegrambot.entities.Message
 import com.github.kotlintelegrambot.entities.ParseMode
-import com.github.kotlintelegrambot.entities.keyboard.KeyboardButton
+import com.github.kotlintelegrambot.entities.TelegramFile
 import com.github.kotlintelegrambot.entities.keyboard.InlineKeyboardButton
+import com.github.kotlintelegrambot.entities.keyboard.KeyboardButton
 import com.github.kotlintelegrambot.network.Response
-import com.github.kotlintelegrambot.network.TelegramError
-import com.github.kotlintelegrambot.network.fold // Убедитесь, что этот fold используется
+import com.github.kotlintelegrambot.network.fold
+import db.BookingStatus
+import db.BookingWithClubName
+import db.Club
+import db.TableInfo
 import fsm.BotFacade
-import fsm.FsmStates // Убедитесь, что это ваш fsm.FsmStates
+import fsm.DraftBooking
+import fsm.FsmStates
 import org.slf4j.LoggerFactory
 import java.time.DayOfWeek
 import java.time.Instant
@@ -28,8 +27,6 @@ import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import java.time.format.TextStyle
 import java.util.Locale
-import com.github.kotlintelegrambot.entities.Message
-import com.github.kotlintelegrambot.entities.TelegramFile // Для sendPhoto
 
 class TelegramBotFacadeImpl(
     private val bot: Bot,
@@ -109,7 +106,7 @@ class TelegramBotFacadeImpl(
     }
     private fun createMainMenuKeyboard(strings: LocalizedStrings, clubs: List<Club>): KeyboardReplyMarkup {
         val clubButtons = clubs.filter { it.isActive }
-            .take(BotConstants.MAX_CLUBS_ON_MAIN_MENU_KEYBOARD)
+            .take(bot.BotConstants.MAX_CLUBS_ON_MAIN_MENU_KEYBOARD)
             .map { KeyboardButton(strings.menuBookTableInClub(it.title)) }
 
         val rows = mutableListOf<List<KeyboardButton>>()
@@ -129,19 +126,19 @@ class TelegramBotFacadeImpl(
 
     private fun createMainMenuInlineKeyboard(strings: LocalizedStrings, clubs: List<Club>): InlineKeyboardMarkup {
         val clubButtons = clubs.filter { it.isActive }
-            .take(BotConstants.MAX_CLUBS_ON_MAIN_MENU_KEYBOARD)
+            .take(bot.BotConstants.MAX_CLUBS_ON_MAIN_MENU_KEYBOARD)
             .map {
                 InlineKeyboardButton.CallbackData(
                     text = strings.menuBookTableInClub(it.title), // text =
-                    callbackData = "${BotConstants.CB_PREFIX_BOOK_CLUB}${it.id}" // callbackData =
+                    callbackData = "${bot.BotConstants.CB_PREFIX_BOOK_CLUB}${it.id}" // callbackData =
                 ) as InlineKeyboardButton // Приведение типа
             }
 
         val rows = mutableListOf<List<InlineKeyboardButton>>() // Тип List<InlineKeyboardButton>
         rows.add(
             listOf(
-                InlineKeyboardButton.CallbackData(strings.menuVenueInfo, BotConstants.CB_MAIN_MENU_VENUE_INFO),
-                InlineKeyboardButton.CallbackData(strings.menuMyBookings, BotConstants.CB_MAIN_MENU_MY_BOOKINGS)
+                InlineKeyboardButton.CallbackData(strings.menuVenueInfo, bot.BotConstants.CB_MAIN_MENU_VENUE_INFO),
+                InlineKeyboardButton.CallbackData(strings.menuMyBookings, bot.BotConstants.CB_MAIN_MENU_MY_BOOKINGS)
             )
         )
         if (clubButtons.isNotEmpty()) { // Проверка, чтобы избежать ошибки приведения типа для пустого списка
@@ -149,16 +146,16 @@ class TelegramBotFacadeImpl(
         }
         rows.add(
             listOf(
-                InlineKeyboardButton.CallbackData(strings.menuAskQuestion, BotConstants.CB_MAIN_MENU_ASK_QUESTION),
-                InlineKeyboardButton.CallbackData(strings.menuHelp, BotConstants.CB_MAIN_MENU_HELP)
+                InlineKeyboardButton.CallbackData(strings.menuAskQuestion, bot.BotConstants.CB_MAIN_MENU_ASK_QUESTION),
+                InlineKeyboardButton.CallbackData(strings.menuHelp, bot.BotConstants.CB_MAIN_MENU_HELP)
             )
         )
         rows.add(
             listOf(
-                InlineKeyboardButton.CallbackData(strings.menuChangeLanguage, BotConstants.CB_MAIN_MENU_CHANGE_LANG)
+                InlineKeyboardButton.CallbackData(strings.menuChangeLanguage, bot.BotConstants.CB_MAIN_MENU_CHANGE_LANG)
             )
         )
-        return InlineKeyboardMarkup.create(rows) // Ожидает List<List<InlineKeyboardButton>>
+        return InlineKeyboardMarkup.Companion.create(rows) // Ожидает List<List<InlineKeyboardButton>>
     }
 
     override suspend fun sendWelcomeMessage(
@@ -176,10 +173,10 @@ class TelegramBotFacadeImpl(
         currentStrings: LocalizedStrings,
         messageId: Long?
     ) {
-        val buttons = StringProviderFactory.allLanguages().map { lang ->
+        val buttons = bot.StringProviderFactory.allLanguages().map { lang ->
             InlineKeyboardButton.CallbackData(
                 text = lang.languageName,
-                callbackData = "${BotConstants.CB_PREFIX_SELECT_LANG}${lang.languageCode}"
+                callbackData = "${bot.BotConstants.CB_PREFIX_SELECT_LANG}${lang.languageCode}"
             ) as InlineKeyboardButton
         }
         val backRow: List<InlineKeyboardButton>? = if (messageId != null) listOf(backButtonToMainMenu(currentStrings)) else null
@@ -187,7 +184,7 @@ class TelegramBotFacadeImpl(
         val rows: List<List<InlineKeyboardButton>> = buttons.chunked(1).let { langRows ->
             if (backRow != null) langRows + listOf(backRow) else langRows
         }
-        val keyboard = InlineKeyboardMarkup.create(rows)
+        val keyboard = InlineKeyboardMarkup.Companion.create(rows)
 
         send(chatId, currentStrings.chooseLanguagePrompt, currentStrings, keyboard, messageIdToEdit = messageId)
     }
@@ -230,7 +227,7 @@ class TelegramBotFacadeImpl(
     ) {
         val activeClubs = clubs.filter { it.isActive }
         val buttons: List<InlineKeyboardButton> = activeClubs.map { club ->
-            InlineKeyboardButton.CallbackData(club.title, "${BotConstants.CB_PREFIX_BOOK_CLUB}${club.id}")
+            InlineKeyboardButton.CallbackData(club.title, "${bot.BotConstants.CB_PREFIX_BOOK_CLUB}${club.id}")
         }
         val rows = buttons.chunked(2).toMutableList()
         if (messageId != null || step == null) {
@@ -240,7 +237,7 @@ class TelegramBotFacadeImpl(
         }
 
 
-        val keyboard = InlineKeyboardMarkup.create(rows)
+        val keyboard = InlineKeyboardMarkup.Companion.create(rows)
         val text = step?.let { "${strings.stepTracker(it.first, it.second)}\n\n${strings.chooseClubPrompt}" }
             ?: strings.chooseClubPrompt
         send(chatId, text, strings, keyboard, messageIdToEdit = messageId)
@@ -299,10 +296,10 @@ class TelegramBotFacadeImpl(
             val currentDate = yearMonth.atDay(dayOfMonth)
             val textDay = strings.calendarDay(currentDate.dayOfMonth)
 
-            val isSelectable = !currentDate.isBefore(today) && !currentDate.isAfter(today.plusMonths(BotConstants.CALENDAR_MONTHS_AHEAD_LIMIT.toLong()))
+            val isSelectable = !currentDate.isBefore(today) && !currentDate.isAfter(today.plusMonths(bot.BotConstants.CALENDAR_MONTHS_AHEAD_LIMIT.toLong()))
 
             val callbackData = if (isSelectable) {
-                "${BotConstants.CB_PREFIX_CHOOSE_DATE_CAL}$currentDate"
+                "${bot.BotConstants.CB_PREFIX_CHOOSE_DATE_CAL}$currentDate"
             } else {
                 "cal_ignore_disabled"
             }
@@ -332,18 +329,18 @@ class TelegramBotFacadeImpl(
             navRow.add(
                 InlineKeyboardButton.CallbackData(
                     strings.calendarPrevMonth,
-                    "${BotConstants.CB_PREFIX_CAL_MONTH_CHANGE}prev_${yearMonth.minusMonths(1)}"
+                    "${bot.BotConstants.CB_PREFIX_CAL_MONTH_CHANGE}prev_${yearMonth.minusMonths(1)}"
                 )
             )
         } else {
             navRow.add(InlineKeyboardButton.CallbackData(" ", "cal_ignore_empty_nav_prev"))
         }
 
-        if (yearMonth.isBefore(YearMonth.from(today.plusMonths(BotConstants.CALENDAR_MONTHS_AHEAD_LIMIT.toLong() -1 )))) {
+        if (yearMonth.isBefore(YearMonth.from(today.plusMonths(bot.BotConstants.CALENDAR_MONTHS_AHEAD_LIMIT.toLong() -1 )))) {
             navRow.add(
                 InlineKeyboardButton.CallbackData(
                     strings.calendarNextMonth,
-                    "${BotConstants.CB_PREFIX_CAL_MONTH_CHANGE}next_${yearMonth.plusMonths(1)}"
+                    "${bot.BotConstants.CB_PREFIX_CAL_MONTH_CHANGE}next_${yearMonth.plusMonths(1)}"
                 )
             )
         } else {
@@ -351,11 +348,11 @@ class TelegramBotFacadeImpl(
         }
         rows.add(navRow)
 
-        rows.add(listOf(backButton(strings, BotConstants.CB_PREFIX_BACK_TO + FsmStates.ChooseClub.name))) // FsmStates.ChooseClub.name
+        rows.add(listOf(backButton(strings, bot.BotConstants.CB_PREFIX_BACK_TO + FsmStates.ChooseClub.name))) // FsmStates.ChooseClub.name
 
         val text = step?.let { "${strings.stepTracker(it.first, it.second)}\n\n${strings.chooseDatePrompt}" }
             ?: strings.chooseDatePrompt
-        val keyboard = InlineKeyboardMarkup.create(rows)
+        val keyboard = InlineKeyboardMarkup.Companion.create(rows)
         send(chatId, text, strings, keyboard, messageIdToEdit = messageId)
     }
 
@@ -369,7 +366,7 @@ class TelegramBotFacadeImpl(
         step: Pair<Int, Int>?
     ) {
         club.floorPlanImageUrl?.let { planUrl ->
-            if (planUrl.isNotBlank() && planUrl != BotConstants.TABLE_LAYOUT_PLACEHOLDER_URL) {
+            if (planUrl.isNotBlank() && planUrl != bot.BotConstants.TABLE_LAYOUT_PLACEHOLDER_URL) {
                 bot.sendPhoto(
                     chatId = chatId,
                     photo = TelegramFile.ByUrl(planUrl), // Используем TelegramFile.ByUrl
@@ -385,20 +382,20 @@ class TelegramBotFacadeImpl(
 
 
         val (text, keyboard) = if (tables.isEmpty()) {
-            strings.noAvailableTables to InlineKeyboardMarkup.create(
-                listOf(listOf(backButton(strings, BotConstants.CB_PREFIX_BACK_TO + FsmStates.ChooseDate.name))) // FsmStates.ChooseDate.name
+            strings.noAvailableTables to InlineKeyboardMarkup.Companion.create(
+                listOf(listOf(backButton(strings, bot.BotConstants.CB_PREFIX_BACK_TO + FsmStates.ChooseDate.name))) // FsmStates.ChooseDate.name
             )
         } else {
             val buttons: List<InlineKeyboardButton> = tables.map { table ->
                 InlineKeyboardButton.CallbackData(
                     strings.tableButtonText(table.number, table.seats),
-                    "${BotConstants.CB_PREFIX_CHOOSE_TABLE}${table.id}"
+                    "${bot.BotConstants.CB_PREFIX_CHOOSE_TABLE}${table.id}"
                 )
             }
             val messageHeader = strings.chooseTablePromptForClubAndDate(club.title, selectedDate.format(getDateFormatter(strings)))
-            messageHeader to InlineKeyboardMarkup.create(
+            messageHeader to InlineKeyboardMarkup.Companion.create(
                 buttons.chunked(1) +
-                        listOf(listOf(backButton(strings, BotConstants.CB_PREFIX_BACK_TO + FsmStates.ChooseDate.name))) // FsmStates.ChooseDate.name
+                        listOf(listOf(backButton(strings, bot.BotConstants.CB_PREFIX_BACK_TO + FsmStates.ChooseDate.name))) // FsmStates.ChooseDate.name
             )
         }
 
@@ -415,8 +412,8 @@ class TelegramBotFacadeImpl(
     ) {
         val text = strings.askPeopleCount
         val fullText = step?.let { "${strings.stepTracker(it.first, it.second)}\n\n$text" } ?: text
-        val keyboard = InlineKeyboardMarkup.create(
-            listOf(listOf(backButton(strings, BotConstants.CB_PREFIX_BACK_TO + FsmStates.ChooseTable.name))) // FsmStates.ChooseTable.name
+        val keyboard = InlineKeyboardMarkup.Companion.create(
+            listOf(listOf(backButton(strings, bot.BotConstants.CB_PREFIX_BACK_TO + FsmStates.ChooseTable.name))) // FsmStates.ChooseTable.name
         )
         send(chatId, fullText, strings, keyboard, messageIdToEdit = messageId)
     }
@@ -431,19 +428,19 @@ class TelegramBotFacadeImpl(
         step: Pair<Int, Int>?
     ) {
         val (text, keyboard) = if (slots.isEmpty()) {
-            strings.noAvailableSlots to InlineKeyboardMarkup.create(
-                listOf(listOf(backButton(strings, BotConstants.CB_PREFIX_BACK_TO + FsmStates.EnterPeople.name))) // FsmStates.EnterPeople.name
+            strings.noAvailableSlots to InlineKeyboardMarkup.Companion.create(
+                listOf(listOf(backButton(strings, bot.BotConstants.CB_PREFIX_BACK_TO + FsmStates.EnterPeople.name))) // FsmStates.EnterPeople.name
             )
         } else {
             val timeFmt = getTimeFormatter(strings)
             val buttons: List<InlineKeyboardButton> = slots.map { (start, end) ->
                 val slotText = "${timeFmt.format(start)} - ${timeFmt.format(end)}"
-                InlineKeyboardButton.CallbackData(slotText, "${BotConstants.CB_PREFIX_CHOOSE_SLOT}${start.epochSecond}:${end.epochSecond}")
+                InlineKeyboardButton.CallbackData(slotText, "${bot.BotConstants.CB_PREFIX_CHOOSE_SLOT}${start.epochSecond}:${end.epochSecond}")
             }
             strings.chooseSlotForTableInClub(table.number, club.title) to
-                    InlineKeyboardMarkup.create(
+                    InlineKeyboardMarkup.Companion.create(
                         buttons.chunked(2),
-                        listOf(listOf(backButton(strings, BotConstants.CB_PREFIX_BACK_TO + FsmStates.EnterPeople.name))) // FsmStates.EnterPeople.name
+                        listOf(listOf(backButton(strings, bot.BotConstants.CB_PREFIX_BACK_TO + FsmStates.EnterPeople.name))) // FsmStates.EnterPeople.name
                     )
         }
 
@@ -459,8 +456,8 @@ class TelegramBotFacadeImpl(
     ) {
         val text = "${strings.askGuestName} ${strings.askGuestNameExample}"
         val fullText = step?.let { "${strings.stepTracker(it.first, it.second)}\n\n$text" } ?: text
-        val keyboard = InlineKeyboardMarkup.create(
-            listOf(listOf(backButton(strings, BotConstants.CB_PREFIX_BACK_TO + FsmStates.ChooseSlot.name))) // FsmStates.ChooseSlot.name
+        val keyboard = InlineKeyboardMarkup.Companion.create(
+            listOf(listOf(backButton(strings, bot.BotConstants.CB_PREFIX_BACK_TO + FsmStates.ChooseSlot.name))) // FsmStates.ChooseSlot.name
         )
         send(chatId, fullText, strings, keyboard, messageIdToEdit = messageId)
     }
@@ -473,8 +470,8 @@ class TelegramBotFacadeImpl(
     ) {
         val text = "${strings.askGuestPhone} ${strings.askGuestPhoneExample}"
         val fullText = step?.let { "${strings.stepTracker(it.first, it.second)}\n\n$text" } ?: text
-        val keyboard = InlineKeyboardMarkup.create(
-            listOf(listOf(backButton(strings, BotConstants.CB_PREFIX_BACK_TO + FsmStates.EnterGuestName.name))) // FsmStates.EnterGuestName.name
+        val keyboard = InlineKeyboardMarkup.Companion.create(
+            listOf(listOf(backButton(strings, bot.BotConstants.CB_PREFIX_BACK_TO + FsmStates.EnterGuestName.name))) // FsmStates.EnterGuestName.name
         )
         send(chatId, fullText, strings, keyboard, messageIdToEdit = messageId)
     }
@@ -505,14 +502,14 @@ class TelegramBotFacadeImpl(
         )
         val text = "${strings.confirmBookingPrompt}\n\n$details"
 
-        val keyboard = InlineKeyboardMarkup.create(
+        val keyboard = InlineKeyboardMarkup.Companion.create(
             listOf(
                 listOf(
-                    InlineKeyboardButton.CallbackData(strings.buttonConfirm, BotConstants.CB_PREFIX_CONFIRM_BOOKING),
-                    InlineKeyboardButton.CallbackData(strings.buttonCancel, BotConstants.CB_PREFIX_CANCEL_ACTION)
+                    InlineKeyboardButton.CallbackData(strings.buttonConfirm, bot.BotConstants.CB_PREFIX_CONFIRM_BOOKING),
+                    InlineKeyboardButton.CallbackData(strings.buttonCancel, bot.BotConstants.CB_PREFIX_CANCEL_ACTION)
                 )
             ),
-            listOf(listOf(backButton(strings, BotConstants.CB_PREFIX_BACK_TO + FsmStates.EnterGuestPhone.name))) // FsmStates.EnterGuestPhone.name
+            listOf(listOf(backButton(strings, bot.BotConstants.CB_PREFIX_BACK_TO + FsmStates.EnterGuestPhone.name))) // FsmStates.EnterGuestPhone.name
         )
         val fullText = step?.let { "${strings.stepTracker(it.first, it.second)}\n\n$text" } ?: text
         send(chatId, fullText, strings, keyboard, messageIdToEdit = messageId)
@@ -556,9 +553,9 @@ class TelegramBotFacadeImpl(
     ) {
         val activeVenues = venues.filter { it.isActive }
         val buttons: List<InlineKeyboardButton> = activeVenues.map { venue ->
-            InlineKeyboardButton.CallbackData(venue.title, "${BotConstants.CB_PREFIX_VENUE_INFO_SHOW}${venue.id}")
+            InlineKeyboardButton.CallbackData(venue.title, "${bot.BotConstants.CB_PREFIX_VENUE_INFO_SHOW}${venue.id}")
         }
-        val keyboard = InlineKeyboardMarkup.create(
+        val keyboard = InlineKeyboardMarkup.Companion.create(
             buttons.chunked(2) +
                     listOf(listOf(backButtonToMainMenu(strings)))
         )
@@ -578,13 +575,13 @@ class TelegramBotFacadeImpl(
         val rows = mutableListOf<List<InlineKeyboardButton>>()
         rows.add(
             listOf(
-                InlineKeyboardButton.CallbackData(strings.venueInfoButtonPosters, "${BotConstants.CB_PREFIX_VENUE_POSTERS}${venue.id}"),
-                InlineKeyboardButton.CallbackData(strings.venueInfoButtonPhotos, "${BotConstants.CB_PREFIX_VENUE_PHOTOS}${venue.id}")
+                InlineKeyboardButton.CallbackData(strings.venueInfoButtonPosters, "${bot.BotConstants.CB_PREFIX_VENUE_POSTERS}${venue.id}"),
+                InlineKeyboardButton.CallbackData(strings.venueInfoButtonPhotos, "${bot.BotConstants.CB_PREFIX_VENUE_PHOTOS}${venue.id}")
             )
         )
-        rows.add(listOf(backButton(strings, BotConstants.CB_PREFIX_BACK_TO + FsmStates.ShowVenueList.name))) // FsmStates.ShowVenueList.name
+        rows.add(listOf(backButton(strings, bot.BotConstants.CB_PREFIX_BACK_TO + FsmStates.ShowVenueList.name))) // FsmStates.ShowVenueList.name
 
-        val keyboard = InlineKeyboardMarkup.create(rows)
+        val keyboard = InlineKeyboardMarkup.Companion.create(rows)
         send(chatId, text, strings, keyboard, messageIdToEdit = messageId)
     }
 
@@ -596,7 +593,7 @@ class TelegramBotFacadeImpl(
         messageId: Long?
     ) {
         val (text, keyboard) = if (bookings.isEmpty()) {
-            strings.noActiveBookings to InlineKeyboardMarkup.create(
+            strings.noActiveBookings to InlineKeyboardMarkup.Companion.create(
                 listOf(listOf(backButtonToMainMenu(strings)))
             )
         } else {
@@ -611,10 +608,10 @@ class TelegramBotFacadeImpl(
                         b.guestsCount,
                         strings.bookingStatusToText(b.status)
                     ),
-                    "${BotConstants.CB_PREFIX_MANAGE_BOOKING}${b.id}"
+                    "${bot.BotConstants.CB_PREFIX_MANAGE_BOOKING}${b.id}"
                 )
             }
-            strings.myBookingsHeader to InlineKeyboardMarkup.create(
+            strings.myBookingsHeader to InlineKeyboardMarkup.Companion.create(
                 buttons.chunked(1) + // Каждая бронь на отдельной кнопке
                         listOf(listOf(backButtonToMainMenu(strings)))
             )
@@ -643,8 +640,8 @@ class TelegramBotFacadeImpl(
         if (booking.status == BookingStatus.NEW || booking.status == BookingStatus.CONFIRMED) {
             rows.add(
                 listOf(
-                    InlineKeyboardButton.CallbackData(strings.buttonChangeBooking, "${BotConstants.CB_PREFIX_DO_CHANGE_BOOKING}${booking.id}"),
-                    InlineKeyboardButton.CallbackData(strings.buttonCancelBooking, "${BotConstants.CB_PREFIX_DO_CANCEL_BOOKING}${booking.id}")
+                    InlineKeyboardButton.CallbackData(strings.buttonChangeBooking, "${bot.BotConstants.CB_PREFIX_DO_CHANGE_BOOKING}${booking.id}"),
+                    InlineKeyboardButton.CallbackData(strings.buttonCancelBooking, "${bot.BotConstants.CB_PREFIX_DO_CANCEL_BOOKING}${booking.id}")
                 )
             )
         }
@@ -653,14 +650,14 @@ class TelegramBotFacadeImpl(
             if (booking.dateEnd.isBefore(Instant.now()) || booking.status == BookingStatus.AWAITING_FEEDBACK) {
                 rows.add(
                     listOf(
-                        InlineKeyboardButton.CallbackData(strings.buttonRateBooking, "${BotConstants.CB_PREFIX_RATE_BOOKING}${booking.id}:_")
+                        InlineKeyboardButton.CallbackData(strings.buttonRateBooking, "${bot.BotConstants.CB_PREFIX_RATE_BOOKING}${booking.id}:_")
                     )
                 )
             }
         }
 
-        rows.add(listOf(backButton(strings, BotConstants.CB_PREFIX_BACK_TO + FsmStates.ShowMyBookingsList.name))) // FsmStates.ShowMyBookingsList.name
-        val keyboard = InlineKeyboardMarkup.create(rows)
+        rows.add(listOf(backButton(strings, bot.BotConstants.CB_PREFIX_BACK_TO + FsmStates.ShowMyBookingsList.name))) // FsmStates.ShowMyBookingsList.name
+        val keyboard = InlineKeyboardMarkup.Companion.create(rows)
         send(chatId, text, strings, keyboard, messageIdToEdit = messageId)
     }
 
@@ -682,8 +679,8 @@ class TelegramBotFacadeImpl(
         strings: LocalizedStrings,
         messageId: Long
     ) {
-        val keyboard = InlineKeyboardMarkup.create(
-            listOf(listOf(backButton(strings, BotConstants.CB_PREFIX_BACK_TO + FsmStates.ManageBookingOptions.name))) // FsmStates.ManageBookingOptions.name
+        val keyboard = InlineKeyboardMarkup.Companion.create(
+            listOf(listOf(backButton(strings, bot.BotConstants.CB_PREFIX_BACK_TO + FsmStates.ManageBookingOptions.name))) // FsmStates.ManageBookingOptions.name
         )
         send(chatId, strings.changeBookingInfo, strings, keyboard, messageIdToEdit = messageId)
     }
@@ -693,7 +690,7 @@ class TelegramBotFacadeImpl(
         strings: LocalizedStrings,
         messageId: Long? // Сделаем messageId nullable, так как он может быть не всегда при вызове этого метода
     ) {
-        val keyboard = InlineKeyboardMarkup.create(
+        val keyboard = InlineKeyboardMarkup.Companion.create(
             listOf(listOf(backButtonToMainMenu(strings)))
         )
         send(chatId, strings.askQuestionPrompt, strings, keyboard, messageIdToEdit = messageId)
@@ -726,11 +723,11 @@ class TelegramBotFacadeImpl(
     ) {
         val text = strings.askForFeedbackPrompt(clubName, bookingId)
         val ratingButtons: List<InlineKeyboardButton> = (1..5).map { rating ->
-            InlineKeyboardButton.CallbackData("⭐".repeat(rating), "${BotConstants.CB_PREFIX_RATE_BOOKING}$bookingId:$rating")
+            InlineKeyboardButton.CallbackData("⭐".repeat(rating), "${bot.BotConstants.CB_PREFIX_RATE_BOOKING}$bookingId:$rating")
         }
-        val keyboard = InlineKeyboardMarkup.create(
+        val keyboard = InlineKeyboardMarkup.Companion.create(
             listOf(ratingButtons), // ratingButtons уже List<InlineKeyboardButton>
-            listOf(listOf(backButton(strings, BotConstants.CB_PREFIX_BACK_TO + FsmStates.ManageBookingOptions.name))) // FsmStates.ManageBookingOptions.name
+            listOf(listOf(backButton(strings, bot.BotConstants.CB_PREFIX_BACK_TO + FsmStates.ManageBookingOptions.name))) // FsmStates.ManageBookingOptions.name
         )
         send(chatId, text, strings, keyboard, messageIdToEdit = messageId)
     }
@@ -783,7 +780,7 @@ class TelegramBotFacadeImpl(
         strings: LocalizedStrings,
         messageId: Long?
     ) {
-        val keyboard = InlineKeyboardMarkup.create(
+        val keyboard = InlineKeyboardMarkup.Companion.create(
             listOf(listOf(backButtonToMainMenu(strings)))
         )
         send(chatId, strings.featureInDevelopment, strings, keyboard, messageIdToEdit = messageId)
@@ -793,5 +790,5 @@ class TelegramBotFacadeImpl(
         InlineKeyboardButton.CallbackData(text = strings.buttonBack, callbackData = callbackData)
 
     private fun backButtonToMainMenu(strings: LocalizedStrings): InlineKeyboardButton =
-        InlineKeyboardButton.CallbackData(text = strings.buttonBack, callbackData = BotConstants.CB_PREFIX_BACK_TO + FsmStates.MainMenu.name) // FsmStates.MainMenu.name
+        InlineKeyboardButton.CallbackData(text = strings.buttonBack, callbackData = bot.BotConstants.CB_PREFIX_BACK_TO + FsmStates.MainMenu.name) // FsmStates.MainMenu.name
 }

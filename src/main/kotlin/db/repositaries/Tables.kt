@@ -1,9 +1,10 @@
-package db
+package db.repositaries
 
 import org.jetbrains.exposed.dao.id.IntIdTable
 import org.jetbrains.exposed.sql.javatime.timestamp
 import java.time.Instant
-import bot.BotConstants //
+import bot.facade.BotConstants //
+import db.BookingStatus
 
 object UsersTable : IntIdTable("users") {
     val telegramId = long("telegram_id").uniqueIndex() //
