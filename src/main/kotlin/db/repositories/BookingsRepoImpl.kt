@@ -3,69 +3,35 @@ package db.repositories
 import db.Booking
 import db.BookingStatus
 import org.jetbrains.exposed.sql.*
-import org.jetbrains.exposed.sql.SqlExpressionBuilder.eq
-import org.jetbrains.exposed.sql.transactions.transaction
+import org.jetbrains.exposed.sql.transactions.experimental.newSuspendedTransaction
 import java.time.LocalDateTime
 
-/**
- * Интерфейс для работы с таблицей бронирований.
- */
-interface BookingsRepo {
-    /**
-     * Сохранить новую бронь. Возвращает Pair(bookingId, loyaltyPointsEarned).
-     *
-     * @param userId            ID пользователя (foreign key в UsersTable)
-     * @param tableId           ID стола (foreign key в TablesTable)
-     * @param guestsCount       количество гостей
-     * @param dateStart         когда начинается бронь (LocalDateTime)
-     * @param dateEnd           когда заканчивается бронь (LocalDateTime)
-     * @param comment           комментарий клиента (nullable)
-     * @param guestName         имя гостя (nullable)
-     * @param guestPhone        телефон гостя (nullable)
-     * @return Pair(id созданного бронирования, начисленные loyalty points)
-     */
-    suspend fun saveBooking(
-        userId: Long,
-        tableId: Int,
-        guestsCount: Int,
-        dateStart: LocalDateTime,
-        dateEnd: LocalDateTime,
-        comment: String?,
-        guestName: String?,
-        guestPhone: String?
-    ): Pair<Int, Int>
-
-    suspend fun findById(id: Int): Booking?
-    suspend fun findAll(): List<Booking>
-
-    /**
-     * Обновить статус брони (например, CONFIRMED, CANCELLED).
-     * Вернёт true, если обновление действительно затронуло хотя бы одну строку.
-     */
-    suspend fun updateStatus(bookingId: Int, status: BookingStatus): Boolean
-
-    /**
-     * Удалить бронь по ID. Вернёт true, если запись была удалена.
-     */
-    suspend fun delete(id: Int): Boolean
-
-
-    suspend fun isTableAvailableOnPeriod(
-        tableId: Int,
-        periodStart: LocalDateTime,
-        periodEnd: LocalDateTime
-    ): Boolean
-}
-
-/**
- * Реализация [BookingsRepo], использует объекты [BookingsTable], [TablesTable] (при подсчёте loyalty).
- */
 class BookingsRepoImpl(
-    private val tablesRepo: TablesRepo
+    private val usersRepo: UsersRepo // Dependency to update loyalty points
 ) : BookingsRepo {
 
+    private fun ResultRow.toBooking(): Booking = Booking(
+        id = this[BookingsTable.id].value,
+        clubId = this[BookingsTable.clubId].value,
+        tableId = this[BookingsTable.tableId].value,
+        userId = this[BookingsTable.userId].value,
+        guestsCount = this[BookingsTable.guestsCount],
+        dateStart = this[BookingsTable.dateStart],
+        dateEnd = this[BookingsTable.dateEnd],
+        status = this[BookingsTable.status],
+        comment = this[BookingsTable.comment],
+        guestName = this[BookingsTable.guestName],
+        guestPhone = this[BookingsTable.guestPhone],
+        loyaltyPointsEarned = this[BookingsTable.loyaltyPointsEarned],
+        feedbackRating = this[BookingsTable.feedbackRating],
+        feedbackComment = this[BookingsTable.feedbackComment],
+        createdAt = this[BookingsTable.createdAt],
+        updatedAt = this[BookingsTable.updatedAt]
+    )
+
     override suspend fun saveBooking(
-        userId: Long,
+        userId: Int,
+        clubId: Int,
         tableId: Int,
         guestsCount: Int,
         dateStart: LocalDateTime,
@@ -73,86 +39,66 @@ class BookingsRepoImpl(
         comment: String?,
         guestName: String?,
         guestPhone: String?
-    ): Pair<Int, Int> = transaction {
-        // Вставляем новую запись в BookingsTable
-        val insertedId = BookingsTable.insertAndGetId { stmt ->
-            stmt[BookingsTable.userId]             = userId
-            stmt[BookingsTable.tableId]            = tableId
-            stmt[BookingsTable.guestsCount]        = guestsCount
-            stmt[BookingsTable.dateStart]          = dateStart
-            stmt[BookingsTable.dateEnd]            = dateEnd
-            stmt[BookingsTable.status]             = BookingStatus.NEW
-            stmt[BookingsTable.comment]            = comment
-            stmt[BookingsTable.guestName]          = guestName
-            stmt[BookingsTable.guestPhone]         = guestPhone
-            // loyaltyPointsEarned и feedbackRating/feedbackComment пока оставляем null
-            // createdAt заполняется автоматически через clientDefault
+    ): Pair<Int, Int> = newSuspendedTransaction {
+        // Check if user, club, table exist
+        val userExists = UsersTable.select { UsersTable.id eq userId }.count() > 0
+        if (!userExists) throw IllegalArgumentException("User with id $userId does not exist.")
+
+        val clubExists = ClubsTable.select { ClubsTable.id eq clubId }.count() > 0
+        if (!clubExists) throw IllegalArgumentException("Club with id $clubId does not exist.")
+
+        val tableExists = TablesTable.select { TablesTable.id eq tableId }.count() > 0
+        if (!tableExists) throw IllegalArgumentException("Table with id $tableId does not exist.")
+
+        // Basic validation for guests count (DB has a CHECK constraint too)
+        if (guestsCount <= 0) throw IllegalArgumentException("Guests count must be positive.")
+
+        val loyaltyPoints = guestsCount * 10 // Example calculation
+
+        val insertedId = BookingsTable.insertAndGetId {
+            it[BookingsTable.clubId] = ClubsTable.id.entityId(clubId)
+            it[BookingsTable.tableId] = TablesTable.id.entityId(tableId)
+            it[BookingsTable.userId] = UsersTable.id.entityId(userId)
+            it[BookingsTable.guestsCount] = guestsCount
+            it[BookingsTable.dateStart] = dateStart
+            it[BookingsTable.dateEnd] = dateEnd
+            it[BookingsTable.status] = BookingStatus.NEW // Default status
+            it[BookingsTable.comment] = comment
+            it[BookingsTable.guestName] = guestName
+            it[BookingsTable.guestPhone] = guestPhone
+            it[BookingsTable.loyaltyPointsEarned] = loyaltyPoints
+            // createdAt is clientDefault
+            it[BookingsTable.updatedAt] = LocalDateTime.now() // Set initial updated_at
         }.value
 
-        // Допустим, лоялти → guestsCount * 10
-        val loyaltyPoints = guestsCount * 10
-        // Обновим колонку loyaltyPointsEarned в только что вставленной записи
-        BookingsTable.update({ BookingsTable.id eq insertedId }) {
-            it[BookingsTable.loyaltyPointsEarned] = loyaltyPoints
-        }
+        // Update user's total loyalty points
+        usersRepo.updateLoyaltyPoints(userId, loyaltyPoints)
 
         Pair(insertedId, loyaltyPoints)
     }
 
-    override suspend fun findById(id: Int): Booking? = transaction {
+    override suspend fun findById(id: Int): Booking? = newSuspendedTransaction {
         BookingsTable
             .select { BookingsTable.id eq id }
-            .mapNotNull { row ->
-                Booking(
-                    id                  = row[BookingsTable.id].value,
-                    userId              = row[BookingsTable.userId].value,
-                    tableId             = row[BookingsTable.tableId].value,
-                    guestsCount         = row[BookingsTable.guestsCount],
-                    dateStart           = row[BookingsTable.dateStart].toLocalDateTime(),
-                    dateEnd             = row[BookingsTable.dateEnd].toLocalDateTime(),
-                    status              = row[BookingsTable.status],
-                    comment             = row[BookingsTable.comment],
-                    guestName           = row[BookingsTable.guestName],
-                    guestPhone          = row[BookingsTable.guestPhone],
-                    loyaltyPointsEarned = row[BookingsTable.loyaltyPointsEarned] ?: 0,
-                    feedbackRating      = row[BookingsTable.feedbackRating],
-                    feedbackComment     = row[BookingsTable.feedbackComment],
-                    createdAt           = row[BookingsTable.createdAt].toLocalDateTime(),
-                    updatedAt           = row[BookingsTable.updatedAt]?.toLocalDateTime()
-                )
-            }
+            .map { it.toBooking() }
             .singleOrNull()
     }
 
-    override suspend fun findAll(): List<Booking> = transaction {
-        BookingsTable.selectAll().map { row ->
-            Booking(
-                id                  = row[BookingsTable.id].value,
-                userId              = row[BookingsTable.userId].value,
-                tableId             = row[BookingsTable.tableId].value,
-                guestsCount         = row[BookingsTable.guestsCount],
-                dateStart           = row[BookingsTable.dateStart].toLocalDateTime(),
-                dateEnd             = row[BookingsTable.dateEnd].toLocalDateTime(),
-                status              = row[BookingsTable.status],
-                comment             = row[BookingsTable.comment],
-                guestName           = row[BookingsTable.guestName],
-                guestPhone          = row[BookingsTable.guestPhone],
-                loyaltyPointsEarned = row[BookingsTable.loyaltyPointsEarned] ?: 0,
-                feedbackRating      = row[BookingsTable.feedbackRating],
-                feedbackComment     = row[BookingsTable.feedbackComment],
-                createdAt           = row[BookingsTable.createdAt].toLocalDateTime(),
-                updatedAt           = row[BookingsTable.updatedAt]?.toLocalDateTime()
-            )
-        }
+    override suspend fun findAllByUserId(userId: Int): List<Booking> = newSuspendedTransaction {
+        BookingsTable
+            .select { BookingsTable.userId eq UsersTable.id.entityId(userId) } // Compare with EntityID<Int>
+            .orderBy(BookingsTable.createdAt, SortOrder.DESC)
+            .map { it.toBooking() }
     }
 
-    override suspend fun updateStatus(bookingId: Int, status: BookingStatus): Boolean = transaction {
+    override suspend fun updateStatus(bookingId: Int, newStatus: BookingStatus): Boolean = newSuspendedTransaction {
         BookingsTable.update({ BookingsTable.id eq bookingId }) {
-            it[BookingsTable.status] = status
+            it[status] = newStatus
+            it[updatedAt] = LocalDateTime.now()
         } > 0
     }
 
-    override suspend fun delete(id: Int): Boolean = transaction {
+    override suspend fun delete(id: Int): Boolean = newSuspendedTransaction {
         BookingsTable.deleteWhere { BookingsTable.id eq id } > 0
     }
 
@@ -160,15 +106,38 @@ class BookingsRepoImpl(
         tableId: Int,
         periodStart: LocalDateTime,
         periodEnd: LocalDateTime
-    ): Boolean = transaction {
-        // Ищём брони этого стола, у которых статус != CANCELLED, и периоды пересекаются
-        val overlapExists = BookingsTable.select {
-            (BookingsTable.tableId eq tableId) and
+    ): Boolean = newSuspendedTransaction {
+        BookingsTable.select {
+            (BookingsTable.tableId eq TablesTable.id.entityId(tableId)) and
                     (BookingsTable.status neq BookingStatus.CANCELLED) and
-                    // условие пересечения интервалов:
-                    (BookingsTable.dateStart lessEq periodEnd) and
-                    (BookingsTable.dateEnd   greaterEq periodStart)
-        }.any()
-        !overlapExists
+                    (BookingsTable.status neq BookingStatus.ARCHIVED) and // Also exclude archived
+                    // Interval overlap condition: (StartA < EndB) and (EndA > StartB)
+                    (BookingsTable.dateStart less periodEnd) and // Booking starts before requested period ends
+                    (BookingsTable.dateEnd greater periodStart)    // Booking ends after requested period starts
+        }.empty() // True if no such bookings exist (i.e., table is available)
+    }
+
+    override suspend fun create(booking: Booking): Booking = newSuspendedTransaction {
+        val id = BookingsTable.insertAndGetId {
+            it[clubId] = ClubsTable.id.entityId(booking.clubId)
+            it[tableId] = TablesTable.id.entityId(booking.tableId)
+            it[userId] = UsersTable.id.entityId(booking.userId)
+            it[guestsCount] = booking.guestsCount
+            it[dateStart] = booking.dateStart
+            it[dateEnd] = booking.dateEnd
+            it[status] = booking.status
+            it[comment] = booking.comment
+            it[guestName] = booking.guestName
+            it[guestPhone] = booking.guestPhone
+            it[loyaltyPointsEarned] = booking.loyaltyPointsEarned
+            // createdAt uses clientDefault if not provided by booking object
+            if (booking.createdAt != null) it[createdAt] = booking.createdAt // Or rely on clientDefault
+            it[updatedAt] = booking.updatedAt ?: LocalDateTime.now()
+        }
+        findById(id.value)!!
+    }
+
+    override suspend fun findAll(): List<Booking> = newSuspendedTransaction { // For RepositoriesTest
+        BookingsTable.selectAll().map { it.toBooking() }
     }
 }

@@ -1,110 +1,112 @@
 package db.repositories
 
-import db.User
+import db.User // From db.Entities
 import org.jetbrains.exposed.sql.*
-import org.jetbrains.exposed.sql.transactions.transaction
-import org.jetbrains.exposed.sql.javatime.datetime
-import org.joda.time.DateTime
+import org.jetbrains.exposed.sql.transactions.experimental.newSuspendedTransaction
 import java.time.LocalDateTime
 
-/**
- * Интерфейс для работы с таблицей пользователей.
- */
-interface UsersRepo {
-    /**
-     * Найти пользователя по telegramId, или создать нового,
-     * если такой ещё не заведён.
-     */
-    suspend fun getOrCreate(
-        telegramUserId: Long,
-        fullName: String,
-        phone: String?,
-        languageCode: String
-    ): User
-
-    suspend fun findByTelegramId(telegramUserId: Long): User?
-
-    /**
-     * Обновить languageCode для конкретного telegramUserId.
-     * Вернёт true, если строка реально изменилась.
-     */
-    suspend fun updateLanguage(telegramUserId: Long, languageCode: String): Boolean
-}
-
-/**
- * Реализация [UsersRepo], использует [UsersTable] из Tables.kt.
- */
 class UsersRepoImpl : UsersRepo {
 
+    private fun ResultRow.toUser(): User = User(
+        id = this[UsersTable.id].value,
+        telegramId = this[UsersTable.telegramId],
+        firstName = this[UsersTable.firstName],
+        lastName = this[UsersTable.lastName],
+        username = this[UsersTable.username],
+        phone = this[UsersTable.phone],
+        languageCode = this[UsersTable.languageCode],
+        loyaltyPoints = this[UsersTable.loyaltyPoints],
+        createdAt = this[UsersTable.createdAt],
+        lastActivityAt = this[UsersTable.lastActivityAt]
+    )
+
     override suspend fun getOrCreate(
-        telegramUserId: Long,
-        fullName: String,
+        telegramId: Long,
+        firstName: String?,
+        lastName: String?,
+        username: String?,
         phone: String?,
         languageCode: String
-    ): User = transaction {
-        // Пытаемся найти существующего
-        var user = UsersTable
-            .select { UsersTable.telegramId eq telegramUserId }
-            .mapNotNull { row ->
-                User(
-                    id             = row[UsersTable.id].value,
-                    telegramUserId = row[UsersTable.telegramId],
-                    fullName       = row[UsersTable.fullName],
-                    phone          = row[UsersTable.phone],
-                    languageCode   = row[UsersTable.languageCode],
-                    lastActivity   = row[UsersTable.lastActivity].toLocalDateTime()
-                )
-            }
+    ): User = newSuspendedTransaction {
+        val existingUser = UsersTable
+            .select { UsersTable.telegramId eq telegramId }
+            .map { it.toUser() }
             .singleOrNull()
 
-        if (user == null) {
-            // Создаём нового
-            val newId = UsersTable.insertAndGetId { stmt ->
-                stmt[UsersTable.telegramId]   = telegramUserId
-                stmt[UsersTable.fullName]     = fullName
-                stmt[UsersTable.phone]        = phone
-                stmt[UsersTable.languageCode] = languageCode
-                // lastActivity заполняется clientDefault
-            }.value
-
-            user = User(
-                id             = newId,
-                telegramUserId = telegramUserId,
-                fullName       = fullName,
-                phone          = phone,
-                languageCode   = languageCode,
-                lastActivity   = LocalDateTime.now()
-            )
+        if (existingUser != null) {
+            UsersTable.update({ UsersTable.id eq existingUser.id }) {
+                it[UsersTable.lastActivityAt] = LocalDateTime.now()
+                // Optionally update other fields if they've changed
+                if (firstName != null) it[UsersTable.firstName] = firstName
+                if (lastName != null) it[UsersTable.lastName] = lastName
+                if (username != null) it[UsersTable.username] = username
+                if (phone != null) it[UsersTable.phone] = phone
+                if (existingUser.languageCode != languageCode) it[UsersTable.languageCode] = languageCode
+            }
+            // Re-fetch to get updated data, especially lastActivityAt
+            UsersTable.select { UsersTable.id eq existingUser.id }.map { it.toUser() }.single()
         } else {
-            // Обновим lastActivity на текущее время (при любом обращении)
-            UsersTable.update({ UsersTable.telegramId eq telegramUserId }) {
-                it[UsersTable.lastActivity] = LocalDateTime.now()
+            val newId = UsersTable.insertAndGetId {
+                it[UsersTable.telegramId] = telegramId
+                it[UsersTable.firstName] = firstName
+                it[UsersTable.lastName] = lastName
+                it[UsersTable.username] = username
+                it[UsersTable.phone] = phone
+                it[UsersTable.languageCode] = languageCode
+                // loyaltyPoints defaults to 0 in DB
+                // createdAt and lastActivityAt use clientDefault
             }
-            user = user.copy(lastActivity = LocalDateTime.now())
+            UsersTable.select { UsersTable.id eq newId }.map { it.toUser() }.single()
         }
-
-        user
     }
 
-    override suspend fun findByTelegramId(telegramUserId: Long): User? = transaction {
+    override suspend fun findById(id: Int): User? = newSuspendedTransaction {
         UsersTable
-            .select { UsersTable.telegramId eq telegramUserId }
-            .mapNotNull { row ->
-                User(
-                    id             = row[UsersTable.id].value,
-                    telegramUserId = row[UsersTable.telegramId],
-                    fullName       = row[UsersTable.fullName],
-                    phone          = row[UsersTable.phone],
-                    languageCode   = row[UsersTable.languageCode],
-                    lastActivity   = row[UsersTable.lastActivity].toLocalDateTime()
-                )
-            }
+            .select { UsersTable.id eq id }
+            .map { it.toUser() }
             .singleOrNull()
     }
 
-    override suspend fun updateLanguage(telegramUserId: Long, languageCode: String): Boolean = transaction {
-        UsersTable.update({ UsersTable.telegramId eq telegramUserId }) {
+    override suspend fun findByTelegramId(telegramId: Long): User? = newSuspendedTransaction {
+        UsersTable
+            .select { UsersTable.telegramId eq telegramId }
+            .map { it.toUser() }
+            .singleOrNull()
+    }
+
+    override suspend fun updateLanguage(telegramId: Long, languageCode: String): Boolean = newSuspendedTransaction {
+        UsersTable.update({ UsersTable.telegramId eq telegramId }) {
             it[UsersTable.languageCode] = languageCode
+            it[UsersTable.lastActivityAt] = LocalDateTime.now()
         } > 0
+    }
+
+    override suspend fun updateLoyaltyPoints(userId: Int, pointsToAdd: Int): User? = newSuspendedTransaction {
+        val user = findById(userId) ?: return@newSuspendedTransaction null
+        val newLoyaltyPoints = user.loyaltyPoints + pointsToAdd
+        UsersTable.update({ UsersTable.id eq userId }) {
+            it[loyaltyPoints] = newLoyaltyPoints
+            it[lastActivityAt] = LocalDateTime.now()
+        }
+        findById(userId) // Return updated user
+    }
+
+    override suspend fun create(user: User): User = newSuspendedTransaction {
+        // This method is for tests, assumes user.id might be 0 or ignored
+        val existing = findByTelegramId(user.telegramId)
+        if (existing != null) return@newSuspendedTransaction existing // Or throw error/update
+
+        val id = UsersTable.insertAndGetId {
+            it[telegramId] = user.telegramId
+            it[firstName] = user.firstName
+            it[lastName] = user.lastName
+            it[username] = user.username
+            it[phone] = user.phone
+            it[languageCode] = user.languageCode
+            it[loyaltyPoints] = user.loyaltyPoints
+            // createdAt and lastActivityAt use clientDefault
+        }
+        // Re-fetch to get DB-generated values
+        UsersTable.select { UsersTable.id eq id }.map { it.toUser() }.single()
     }
 }
