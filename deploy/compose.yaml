@@ -1,30 +1,58 @@
-version: "3.9"
+version: '3.8'
 
 services:
-  postgres:
-    image: postgres:16
+  # ───────────────────────── PostgreSQL ─────────────────────────
+  postgres_db:
+    image: postgres:16-alpine
+    container_name: club_booking_bot_postgres
     restart: unless-stopped
     environment:
-      POSTGRES_DB: ${POSTGRES_DB}
-      POSTGRES_USER: ${POSTGRES_USER}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
-    volumes:
-      - pgdata:/var/lib/postgresql/data
+      POSTGRES_DB: ${POSTGRES_DB:-club_booking_bot_db_v2}
+      POSTGRES_USER: ${POSTGRES_USER:-clubadmin}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-supersecret}
+      TZ: ${DEFAULT_TIMEZONE:-Europe/Moscow}
     ports:
-      - "5432:5432"
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
 
-  booking-bot:
-    build: .
+  # ───────────────────────── Telegram-бот ─────────────────────────
+  booking_bot_app:
+    build:
+      context: ..            # корень репозитория (где лежит Dockerfile)
+      dockerfile: Dockerfile
+    container_name: club_booking_bot_app
+    depends_on:
+      - postgres_db          # бот стартует после запуска БД
     restart: unless-stopped
     environment:
       TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN}
-      POSTGRES_HOST: postgres
+      POSTGRES_HOST: postgres_db   # имя сервиса БД в общей сети
       POSTGRES_PORT: 5432
-      POSTGRES_DB: ${POSTGRES_DB}
-      POSTGRES_USER: ${POSTGRES_USER}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
-    depends_on:
-      - postgres
+      POSTGRES_DB: ${POSTGRES_DB:-club_booking_bot_db_v2}
+      POSTGRES_USER: ${POSTGRES_USER:-clubadmin}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-supersecret}
+      DEFAULT_TIMEZONE: ${DEFAULT_TIMEZONE:-Europe/Moscow}
+      # Дополнительно, если используете EnvConfig:
+      TELEGRAM_LOG_LEVEL: ${TELEGRAM_LOG_LEVEL:-Error}
+    # При желании можно пробросить порт бота наружу (если он слушает HTTP-webhook):
+    # ports:
+    #   - "8080:8080"
+
+  # ───────────────────────── (опция) pgAdmin ─────────────────────────
+  # pgadmin:
+  #   image: dpage/pgadmin4
+  #   container_name: club_booking_bot_pgadmin
+  #   restart: unless-stopped
+  #   depends_on:
+  #     - postgres_db
+  #   environment:
+  #     PGADMIN_DEFAULT_EMAIL: ${PGADMIN_EMAIL:-admin@example.com}
+  #     PGADMIN_DEFAULT_PASSWORD: ${PGADMIN_PASSWORD:-admin}
+  #     # Автоподключение к нашей БД
+  #     PGADMIN_LISTEN_PORT: 5050
+  #   ports:
+  #     - "5050:5050"
 
 volumes:
-  pgdata:
+  postgres_data:

@@ -1,0 +1,40 @@
+{
+  "clubs": [
+    {
+      "id": 1,
+      "name": "Neon Club",
+      "address": "Москва, Тверская 15",
+      "timezone": "Europe/Moscow"
+    }
+  ],
+
+  "tables": [
+    {
+      "id": 1,
+      "clubId": 1,
+      "name": "VIP 1",
+      "capacity": 6
+    }
+  ],
+
+  "users": [
+    {
+      "id": 1001,
+      "telegramId": 123456789,
+      "fullName": "Иван Петров",
+      "phone": "+79161234567"
+    }
+  ],
+
+  "bookings": [
+    {
+      "id": 5001,
+      "userId": 1001,
+      "tableId": 1,
+      "date": "2025-06-05",
+      "time": "22:00",
+      "guestCount": 4,
+      "status": "CONFIRMED"
+    }
+  ]
+}
