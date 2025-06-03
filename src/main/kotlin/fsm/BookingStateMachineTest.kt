@@ -1,130 +1,151 @@
 package fsm
 
-import kotlinx.coroutines.*
-import kotlinx.coroutines.test.runBlockingTest
-import org.testng.annotations.Test
+import db.Club
+import db.TableInfo
+import db.User
+import db.repositories.*
+import io.mockk.*
+import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.test.runTest
+import org.junit.jupiter.api.Assertions.assertEquals
+import org.junit.jupiter.api.Assertions.assertTrue
+import org.junit.jupiter.api.BeforeEach
+import org.junit.jupiter.api.Test
 import java.time.LocalDate
-import kotlin.test.assertEquals
+import com.github.kotlintelegrambot.entities.ChatId
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers // Or TestCoroutineScheduler for more control
+import bot.facade.LocalizedStrings
+import bot.facade.StringProviderFactory
 
-/**
- * Несколько тестов, проверяющих базовые переходы FSM.
- */
 @OptIn(ExperimentalCoroutinesApi::class)
 class BookingStateMachineTest {
 
-    private val testUserId = 12345L
+    private val testTelegramUserId = 12345L
+    private val testChatId = ChatId.fromId(testTelegramUserId)
+    private lateinit var machine: BookingStateMachine
 
-    /**
-     * Проверяем простой сценарий: StartBooking → выбираем клуб → выбираем дату → выбираем стол → вводим гостей → вводим имя → вводим телефон → подтверждаем.
-     */
-    @Test
-    fun `full booking flow should end in Finished`() = runBlockingTest {
-        val sentMessages = mutableListOf<Pair<Long, String>>()
+    // Mocks for dependencies
+    private lateinit var clubsRepoMock: ClubsRepo
+    private lateinit var tablesRepoMock: TablesRepo
+    private lateinit var bookingsRepoMock: BookingsRepo
+    private lateinit var usersRepoMock: UsersRepo
+    private lateinit var botFacadeMock: BotFacade
+    private lateinit var testScope: CoroutineScope
+    private lateinit var testStrings: LocalizedStrings
 
-        // Лямбда-заглушка вместо реальной отправки в Telegram:
-        val fakeSend: (Long, String, InlineKeyboard?) -> Unit = { chatId, text, _ ->
-            sentMessages += (chatId to text)
-        }
+    @BeforeEach
+    fun setUp() {
+        clubsRepoMock = mockk(relaxed = true)
+        tablesRepoMock = mockk(relaxed = true)
+        bookingsRepoMock = mockk(relaxed = true)
+        usersRepoMock = mockk(relaxed = true)
+        botFacadeMock = mockk(relaxed = true)
+        testScope = CoroutineScope(Dispatchers.Unconfined) // For immediate execution
+        testStrings = StringProviderFactory.get("ru") // Default test strings
 
-        val machine = BookingStateMachine(testUserId, fakeSend)
-
-        // Начальное состояние — Idle
-        assertEquals(BookingState.Idle, machine.state.value)
-
-        // Шаг 1. /book
-        machine.onEvent(BookingEvent.StartBooking)
-        advanceUntilIdle()
-        assertEquals(BookingState.ChoosingClub, machine.state.value)
-        assert(sentMessages.last().second.contains("Выберите клуб"))
-
-        // Шаг 2. выбираем clubId=7
-        machine.onEvent(BookingEvent.ClubSelected(7))
-        advanceUntilIdle()
-        assertEquals(BookingState.EnteringDate(clubId = 7), machine.state.value)
-        assert(sentMessages.last().second.contains("Пожалуйста, выберите дату"))
-
-        // Шаг 3. выбираем дату = 2023-06-20
-        val date = LocalDate.of(2023, 6, 20)
-        machine.onEvent(BookingEvent.DatePicked(date))
-        advanceUntilIdle()
-        assertEquals(BookingState.EnteringTable(clubId = 7, date = date), machine.state.value)
-        assert(sentMessages.last().second.contains("Выберите стол"))
-
-        // Шаг 4. выбираем стол №3, места=4
-        machine.onEvent(BookingEvent.TableSelected(tableNumber = 3, tableSeats = 4))
-        advanceUntilIdle()
-        assertEquals(
-            BookingState.EnteringPeopleCount(
-                clubId = 7,
-                date = date,
-                tableNumber = 3,
-                tableSeats = 4
-            ),
-            machine.state.value
+        val fsmDeps = FsmDeps(
+            clubsRepoMock, tablesRepoMock, bookingsRepoMock, usersRepoMock,
+            botFacadeMock, testScope, testStrings
         )
-        assert(sentMessages.last().second.contains("Сколько гостей будет"))
+        machine = BookingStateMachine(fsmDeps, testChatId, testTelegramUserId)
 
-        // Шаг 5. вводим людей = 3
-        machine.onEvent(BookingEvent.PeopleCountEntered(3))
-        advanceUntilIdle()
-        assertEquals(
-            BookingState.EnteringGuestName(
-                clubId = 7,
-                date = date,
-                tableNumber = 3,
-                tableSeats = 4,
-                peopleCount = 3
-            ), machine.state.value
-        )
-        assert(sentMessages.last().second.contains("введите имя"))
-
-        // Шаг 6. вводим имя «Иван»
-        machine.onEvent(BookingEvent.GuestNameEntered("Иван"))
-        advanceUntilIdle()
-        assertEquals(
-            BookingState.EnteringGuestPhone(
-                clubId = 7,
-                date = date,
-                tableNumber = 3,
-                tableSeats = 4,
-                peopleCount = 3,
-                guestName = "Иван"
-            ), machine.state.value
-        )
-        assert(sentMessages.last().second.contains("введите телефон"))
-
-        // Шаг 7. вводим телефон «+79123456789»
-        machine.onEvent(BookingEvent.GuestPhoneEntered("+79123456789"))
-        advanceUntilIdle()
-        assert(machine.state.value is BookingState.ConfirmBooking)
-        assert(sentMessages.last().second.contains("Проверьте детали"))
-
-        // Шаг 8. подтверждаем бронь
-        machine.onEvent(BookingEvent.ConfirmBookingNow)
-        advanceUntilIdle()
-        assertEquals(BookingState.Idle, machine.state.value)
-        assert(sentMessages.last().second.contains("Ваша бронь"))
+        // Mock user lookup for booking confirmation
+        val mockUser = User(id=1, telegramId=testTelegramUserId, firstName="Test", lastName="User", username="testuser", phone=null, languageCode="ru", loyaltyPoints=0, createdAt=LocalDate.now().atStartOfDay(), lastActivityAt=LocalDate.now().atStartOfDay())
+        coEvery { usersRepoMock.findByTelegramId(testTelegramUserId) } returns mockUser
     }
 
-    /**
-     * Если на любом этапе прислать CancelBooking, машина перейдет в Cancelled, а потом в Idle.
-     */
     @Test
-    fun `cancel at any step returns to Idle`() = runBlockingTest {
-        val sent = mutableListOf<String>()
-        val machine = BookingStateMachine(testUserId) { chatId, text, _ ->
-            sent += text
-        }
-
-        // Переводим в ChoosingClub
-        machine.onEvent(BookingEvent.StartBooking)
-        advanceUntilIdle()
-        assertEquals(BookingState.ChoosingClub, machine.state.value)
-
-        // Отправляем Cancel
-        machine.onEvent(BookingEvent.CancelBooking)
-        advanceUntilIdle()
+    fun `full booking flow should end in BookingDone`() = runTest {
+        // Initial state
         assertEquals(BookingState.Idle, machine.state.value)
-        assert(sent.last().contains("отменено", ignoreCase = true))
+
+        // --- Step 1: Start ---
+        val mockClubs = listOf(Club(id = 1, name = "Test Club 1", code="TC1", workingHours="10:00-23:00", timezone="Europe/Moscow", createdAt=LocalDate.now().atStartOfDay(), updatedAt=null, description = null, address = null, phone = null, photoUrl = null, floorPlanImageUrl = null, isActive = true), Club(id = 2, name = "Test Club 2", code="TC2", workingHours="10:00-23:00", timezone="Europe/Moscow", createdAt=LocalDate.now().atStartOfDay(), updatedAt=null, description = null, address = null, phone = null, photoUrl = null, floorPlanImageUrl = null, isActive = true))
+        coEvery { clubsRepoMock.getAllActiveClubs() } returns mockClubs
+        machine.onEvent(BookingEvent.Start)
+        assertTrue(machine.state.value is BookingState.ShowingClubs)
+        coVerify { botFacadeMock.sendChooseClubKeyboard(testChatId, mockClubs, testStrings, null, null) }
+
+        // --- Step 2: Club Selected ---
+        val selectedClubId = 1
+        val selectedClub = mockClubs.first { it.id == selectedClubId }
+        val availableDates = listOf(LocalDate.now().plusDays(1), LocalDate.now().plusDays(2))
+        coEvery { clubsRepoMock.findById(selectedClubId) } returns selectedClub
+        coEvery { tablesRepoMock.getAvailableDatesForClub(selectedClubId, any(), any()) } returns availableDates
+        machine.onEvent(BookingEvent.ClubSelected(selectedClubId))
+        assertTrue(machine.state.value is BookingState.ShowingDates)
+        assertEquals(selectedClubId, (machine.state.value as BookingState.ShowingDates).clubId)
+        coVerify { botFacadeMock.sendCalendar(testChatId, selectedClubId, selectedClub.name, availableDates, testStrings, null, null) }
+
+        // --- Step 3: Date Selected ---
+        val selectedDate = availableDates.first()
+        val mockTables = listOf(TableInfo(id = 10, clubId = selectedClubId, number = 1, seats = 4, label = "Table 1", isActive=true, description=null, posX=null,posY=null,photoUrl=null))
+        coEvery { tablesRepoMock.getAvailableTables(selectedClubId, selectedDate) } returns mockTables
+        machine.onEvent(BookingEvent.DateSelected(selectedDate))
+        assertTrue(machine.state.value is BookingState.ShowingTables)
+        assertEquals(selectedDate, (machine.state.value as BookingState.ShowingTables).date)
+        coVerify { botFacadeMock.sendChooseTableKeyboard(testChatId, selectedClubId, selectedClub.name, selectedDate, mockTables, testStrings, null, null) }
+
+        // --- Step 4: Table Selected ---
+        val selectedTableInfo = mockTables.first()
+        val mockSlots = listOf("18:00–20:00", "20:00–22:00")
+        coEvery { tablesRepoMock.getAvailableSlotsForTable(selectedTableInfo.id, selectedDate, selectedClub) } returns mockSlots // Pass the club object
+        machine.onEvent(BookingEvent.TableSelected(selectedTableInfo))
+        assertTrue(machine.state.value is BookingState.ShowingSlots)
+        assertEquals(selectedTableInfo, (machine.state.value as BookingState.ShowingSlots).table)
+        coVerify { botFacadeMock.sendChooseSlotKeyboard(testChatId, selectedClubId, selectedClub.name, selectedDate, selectedTableInfo, mockSlots, testStrings, null, null) }
+
+        // --- Step 5: Slot Selected ---
+        val selectedSlot = mockSlots.first()
+        machine.onEvent(BookingEvent.SlotSelected(selectedSlot))
+        assertTrue(machine.state.value is BookingState.EnteringGuestCount)
+        assertEquals(selectedSlot, (machine.state.value as BookingState.EnteringGuestCount).slot)
+        coVerify { botFacadeMock.askGuestCount(testChatId, selectedClub.name, selectedTableInfo.label, selectedDate, selectedSlot, testStrings, null, null) }
+
+        // --- Step 6: Guest Count Entered ---
+        val guestCount = 2
+        machine.onEvent(BookingEvent.GuestCountEntered(guestCount))
+        assertTrue(machine.state.value is BookingState.EnteringGuestName)
+        assertEquals(guestCount, (machine.state.value as BookingState.EnteringGuestName).draft.peopleCount)
+        coVerify { botFacadeMock.askGuestName(testChatId, testStrings, null, null) }
+
+        // --- Step 7: Guest Name Entered ---
+        val guestName = "Test Guest"
+        machine.onEvent(BookingEvent.GuestNameEntered(guestName))
+        assertTrue(machine.state.value is BookingState.EnteringGuestPhone)
+        assertEquals(guestName, (machine.state.value as BookingState.EnteringGuestPhone).draft.guestName)
+        coVerify { botFacadeMock.askGuestPhone(testChatId, testStrings, null, null) }
+
+        // --- Step 8: Guest Phone Entered ---
+        val guestPhone = "+1234567890"
+        machine.onEvent(BookingEvent.GuestPhoneEntered(guestPhone))
+        assertTrue(machine.state.value is BookingState.ConfirmingBooking)
+        assertEquals(guestPhone, (machine.state.value as BookingState.ConfirmingBooking).draft.guestPhone)
+        val expectedDraft = (machine.state.value as BookingState.ConfirmingBooking).draft.toFinal()
+        coVerify { botFacadeMock.showConfirmBooking(testChatId, expectedDraft, testStrings, null, null) }
+
+
+        // --- Step 9: Confirm Booking ---
+        val bookingId = 1001
+        val loyaltyPoints = 20
+        coEvery { bookingsRepoMock.saveBooking(any(), any(), any(), any(), any(), any(), any(), any(), any()) } returns Pair(bookingId, loyaltyPoints)
+        machine.onEvent(BookingEvent.ConfirmBooking)
+        assertTrue(machine.state.value is BookingState.BookingDone)
+        assertEquals(bookingId, (machine.state.value as BookingState.BookingDone).bookingId)
+        coVerify { botFacadeMock.sendBookingSuccessMessage(testChatId, bookingId, loyaltyPoints, testStrings, emptyList(), null) }
+    }
+
+    @Test
+    fun `cancel at any step returns to Cancelled state`() = runTest {
+        // Start and go to ChoosingClub
+        coEvery { clubsRepoMock.getAllActiveClubs() } returns emptyList() // Mock repo call
+        machine.onEvent(BookingEvent.Start)
+        assertTrue(machine.state.value is BookingState.ShowingClubs) // Or ChoosingClub if that's distinct
+
+        // Send Cancel event
+        machine.onEvent(BookingEvent.Cancel)
+        assertEquals(BookingState.Cancelled, machine.state.value)
+        coVerify { botFacadeMock.sendActionCancelledMessage(testChatId, testStrings, emptyList(), null) }
     }
 }
