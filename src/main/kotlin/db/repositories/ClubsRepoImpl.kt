@@ -1,16 +1,18 @@
 package db.repositories
 
-import db.Club // From db.Entities
+import db.Club
 import org.jetbrains.exposed.sql.*
 import org.jetbrains.exposed.sql.transactions.experimental.newSuspendedTransaction
 import java.time.LocalDateTime
+import org.jetbrains.exposed.dao.id.EntityID // For create
 
 class ClubsRepoImpl : ClubsRepo {
 
     private fun ResultRow.toClub(): Club = Club(
         id = this[ClubsTable.id].value,
         code = this[ClubsTable.code],
-        title = this[ClubsTable.title],
+        // Assuming Club data class uses 'name' for what ClubsTable calls 'title'
+        name = this[ClubsTable.title],
         description = this[ClubsTable.description],
         address = this[ClubsTable.address],
         phone = this[ClubsTable.phone],
@@ -19,8 +21,8 @@ class ClubsRepoImpl : ClubsRepo {
         photoUrl = this[ClubsTable.photoUrl],
         floorPlanImageUrl = this[ClubsTable.floorPlanImageUrl],
         isActive = this[ClubsTable.isActive],
-        createdAt = this[ClubsTable.createdAt]
-        // updatedAt = this[ClubsTable.updatedAt] // Add if ClubsTable has updatedAt
+        createdAt = this[ClubsTable.createdAt],
+        updatedAt = null // ClubsTable in Tables.kt doesn't have updatedAt. Add if needed.
     )
 
     override suspend fun getAllActiveClubs(): List<Club> = newSuspendedTransaction {
@@ -44,10 +46,9 @@ class ClubsRepoImpl : ClubsRepo {
     }
 
     override suspend fun create(club: Club): Club = newSuspendedTransaction {
-        val id = ClubsTable.insertAndGetId {
+        val id : EntityID<Int> = ClubsTable.insertAndGetId {
             it[code] = club.code
-            it[title] = club.name // V001 schema uses 'title', test-data.json uses 'name'
-            // db.Club entity needs to be consistent; assume club.name maps to title
+            it[title] = club.name // Club.name maps to ClubsTable.title
             it[description] = club.description
             it[address] = club.address
             it[phone] = club.phone
@@ -56,8 +57,9 @@ class ClubsRepoImpl : ClubsRepo {
             it[photoUrl] = club.photoUrl
             it[floorPlanImageUrl] = club.floorPlanImageUrl
             it[isActive] = club.isActive
-            // createdAt is clientDefault
+            // createdAt has clientDefault
         }
-        club.copy(id = id.value, createdAt = findById(id.value)!!.createdAt) // Re-fetch to get createdAt
+        // Re-fetch to get DB generated values like createdAt
+        findById(id.value)!!
     }
 }

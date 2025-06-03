@@ -7,10 +7,12 @@ import org.jetbrains.exposed.sql.transactions.experimental.newSuspendedTransacti
 import java.time.*
 import java.time.format.DateTimeFormatter
 import java.time.format.DateTimeParseException
+import org.jetbrains.exposed.dao.id.EntityID // For setting reference column
 
-// Constants for booking logic - consider making these configurable
-private const val DEFAULT_BOOKING_SLOT_DURATION_MINUTES = 120L // 2 hours
-private const val DEFAULT_BUFFER_MINUTES_AROUND_BOOKING = 0L // No buffer for this example
+// ... (constants and helper methods parseWorkingHours, toTableInfo remain same) ...
+// Constants for booking logic
+private const val DEFAULT_BOOKING_SLOT_DURATION_MINUTES = 120L
+private const val DEFAULT_BUFFER_MINUTES_AROUND_BOOKING = 0L
 
 class TablesRepoImpl(
     private val bookingsRepo: BookingsRepo
@@ -31,9 +33,8 @@ class TablesRepoImpl(
 
     private fun parseWorkingHours(workingHoursString: String?, clubZoneId: ZoneId): Pair<LocalTime, LocalTime>? {
         if (workingHoursString.isNullOrBlank()) return null
-        // Assuming format "HH:MM-HH:MM" (e.g., "10:00-02:00" where 02:00 is next day)
         val parts = workingHoursString.split("-")
-        if (parts.size != 2) return null // Invalid format
+        if (parts.size != 2) return null
 
         return try {
             val startTime = LocalTime.parse(parts[0].trim(), DateTimeFormatter.ISO_LOCAL_TIME)
@@ -44,9 +45,10 @@ class TablesRepoImpl(
         }
     }
 
+
     override suspend fun getAllActiveTablesByClub(clubId: Int): List<TableInfo> = newSuspendedTransaction {
         TablesTable
-            .select { (TablesTable.clubId eq clubId) and (TablesTable.isActive eq true) }
+            .select { (TablesTable.clubId eq EntityID(clubId, ClubsTable)) and (TablesTable.isActive eq true) }
             .map { it.toTableInfo() }
     }
 
@@ -58,25 +60,24 @@ class TablesRepoImpl(
     }
 
     override suspend fun getAvailableDatesForClub(clubId: Int, month: LocalDate, lookAheadMonths: Int): List<LocalDate> = newSuspendedTransaction {
-        val club = ClubsTable.select { ClubsTable.id eq clubId }.singleOrNull()?.let {
-            Club( // Minimal club for working hours and timezone
+        val clubEntity = ClubsTable.select { ClubsTable.id eq clubId }.singleOrNull()?.let {
+            Club(
                 id = it[ClubsTable.id].value,
                 name = it[ClubsTable.title],
                 code = it[ClubsTable.code],
                 workingHours = it[ClubsTable.workingHours],
                 timezone = it[ClubsTable.timezone],
-                // Fill other fields as needed or make Club nullable
                 description = null, address = null, phone = null, photoUrl = null, floorPlanImageUrl = null, isActive = true, createdAt = LocalDateTime.now(), updatedAt = null
             )
         } ?: return@newSuspendedTransaction emptyList()
 
-        val clubZoneId = try { ZoneId.of(club.timezone) } catch (e: Exception) { ZoneId.systemDefault() }
-        val workingHoursPair = parseWorkingHours(club.workingHours, clubZoneId)
-            ?: return@newSuspendedTransaction emptyList() // No working hours, no dates
+        val clubZoneId = try { ZoneId.of(clubEntity.timezone) } catch (e: Exception) { ZoneId.systemDefault() }
+        parseWorkingHours(clubEntity.workingHours, clubZoneId)
+            ?: return@newSuspendedTransaction emptyList()
 
         val todayInClubTimezone = LocalDate.now(clubZoneId)
         val startDate = if (month.isBefore(todayInClubTimezone) && month.year == todayInClubTimezone.year && month.month == todayInClubTimezone.month) {
-            todayInClubTimezone // Start from today if query month is current and in past
+            todayInClubTimezone
         } else {
             month.withDayOfMonth(1)
         }
@@ -87,10 +88,9 @@ class TablesRepoImpl(
         val availableDates = mutableListOf<LocalDate>()
         var currentDate = startDate
         while (!currentDate.isAfter(endDate)) {
-            if (!currentDate.isBefore(todayInClubTimezone)) { // Only check from today onwards
-                // Check if any table has any slot available on this date
+            if (!currentDate.isBefore(todayInClubTimezone)) {
                 val hasAnyAvailability = allClubTables.any { table ->
-                    getAvailableSlotsForTable(table.id, currentDate, club).isNotEmpty()
+                    getAvailableSlotsForTable(table.id, currentDate, clubEntity).isNotEmpty()
                 }
                 if (hasAnyAvailability) {
                     availableDates.add(currentDate)
@@ -103,8 +103,8 @@ class TablesRepoImpl(
 
 
     override suspend fun getAvailableTables(clubId: Int, date: LocalDate): List<TableInfo> = newSuspendedTransaction {
-        val club = ClubsTable.select { ClubsTable.id eq clubId }.singleOrNull()?.let {
-            Club( // Minimal club for working hours and timezone
+        val clubEntity = ClubsTable.select { ClubsTable.id eq clubId }.singleOrNull()?.let {
+            Club(
                 id = it[ClubsTable.id].value,
                 name = it[ClubsTable.title],
                 code = it[ClubsTable.code],
@@ -116,7 +116,7 @@ class TablesRepoImpl(
 
         val allClubTables = getAllActiveTablesByClub(clubId)
         allClubTables.filter { table ->
-            getAvailableSlotsForTable(table.id, date, club).isNotEmpty()
+            getAvailableSlotsForTable(table.id, date, clubEntity).isNotEmpty()
         }
     }
 
@@ -131,29 +131,22 @@ class TablesRepoImpl(
         val slotDuration = Duration.ofMinutes(DEFAULT_BOOKING_SLOT_DURATION_MINUTES)
         val bufferDuration = Duration.ofMinutes(DEFAULT_BUFFER_MINUTES_AROUND_BOOKING)
 
-        // Adjust for bookings that might cross midnight into the club's next working day opening
-        var currentSlotStartLocal = clubOpensLocal
         val nowInClubTime = ZonedDateTime.now(clubZoneId)
-        val queryDateTime = date.atTime(currentSlotStartLocal)
 
-        // Determine the end of the working period for slot generation
-        // If closing time is before opening time (e.g. 18:00 - 02:00), it means it closes next day.
         val workingDayEndLocal: LocalDateTime = if (clubClosesLocal.isBefore(clubOpensLocal)) {
             date.plusDays(1).atTime(clubClosesLocal)
         } else {
             date.atTime(clubClosesLocal)
         }
 
-        var slotStartDateTime = date.atTime(currentSlotStartLocal)
+        var slotStartDateTime = date.atTime(clubOpensLocal)
 
         while(true) {
             val slotEndDateTime = slotStartDateTime.plus(slotDuration)
-            // Ensure the slot itself is within the working period or ends exactly at closing.
             if (slotEndDateTime.isAfter(workingDayEndLocal)) break
 
-            // Check if current slot start is in the past for today's date
-            if (date.isEqual(nowInClubTime.toLocalDate()) && slotStartDateTime.toLocalTime().isBefore(nowInClubTime.toLocalTime())) {
-                slotStartDateTime = slotStartDateTime.plusMinutes(30) // Iterate to next possible slot (e.g. 30 min increment)
+            if (date.isEqual(nowInClubTime.toLocalDate()) && slotStartDateTime.toLocalTime().isBefore(nowInClubTime.toLocalTime().plusMinutes(1))) { // allow slots starting now
+                slotStartDateTime = slotStartDateTime.plusMinutes(30)
                 continue
             }
 
@@ -165,8 +158,7 @@ class TablesRepoImpl(
             if (!isBooked) {
                 availableSlots.add("${slotStartDateTime.toLocalTime().format(DateTimeFormatter.ISO_LOCAL_TIME)}–${slotEndDateTime.toLocalTime().format(DateTimeFormatter.ISO_LOCAL_TIME)}")
             }
-            // Increment for next slot, e.g., every 30 minutes or bookingSlotDurationMinutes
-            slotStartDateTime = slotStartDateTime.plusMinutes(30) // Or based on a fixed increment or slotDuration
+            slotStartDateTime = slotStartDateTime.plusMinutes(30)
         }
         availableSlots
     }
@@ -176,7 +168,7 @@ class TablesRepoImpl(
         if (!clubExists) throw IllegalArgumentException("Club with id ${tableInfo.clubId} does not exist.")
 
         val id = TablesTable.insertAndGetId {
-            it[clubId] = ClubsTable.id.entityId(tableInfo.clubId)
+            it[clubId] = EntityID(tableInfo.clubId, ClubsTable) // Correctly use EntityID
             it[number] = tableInfo.number
             it[seats] = tableInfo.seats
             it[description] = tableInfo.description

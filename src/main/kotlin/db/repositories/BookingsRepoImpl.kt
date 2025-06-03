@@ -5,9 +5,11 @@ import db.BookingStatus
 import org.jetbrains.exposed.sql.*
 import org.jetbrains.exposed.sql.transactions.experimental.newSuspendedTransaction
 import java.time.LocalDateTime
+import org.jetbrains.exposed.dao.id.EntityID // Required for setting reference columns
+import org.jetbrains.exposed.sql.SqlExpressionBuilder.eq
 
 class BookingsRepoImpl(
-    private val usersRepo: UsersRepo // Dependency to update loyalty points
+    private val usersRepo: UsersRepo
 ) : BookingsRepo {
 
     private fun ResultRow.toBooking(): Booking = Booking(
@@ -30,7 +32,7 @@ class BookingsRepoImpl(
     )
 
     override suspend fun saveBooking(
-        userId: Int,
+        userId: Int, // This is the internal UsersTable.id (Int)
         clubId: Int,
         tableId: Int,
         guestsCount: Int,
@@ -40,40 +42,32 @@ class BookingsRepoImpl(
         guestName: String?,
         guestPhone: String?
     ): Pair<Int, Int> = newSuspendedTransaction {
-        // Check if user, club, table exist
         val userExists = UsersTable.select { UsersTable.id eq userId }.count() > 0
         if (!userExists) throw IllegalArgumentException("User with id $userId does not exist.")
-
         val clubExists = ClubsTable.select { ClubsTable.id eq clubId }.count() > 0
         if (!clubExists) throw IllegalArgumentException("Club with id $clubId does not exist.")
-
         val tableExists = TablesTable.select { TablesTable.id eq tableId }.count() > 0
         if (!tableExists) throw IllegalArgumentException("Table with id $tableId does not exist.")
-
-        // Basic validation for guests count (DB has a CHECK constraint too)
         if (guestsCount <= 0) throw IllegalArgumentException("Guests count must be positive.")
 
-        val loyaltyPoints = guestsCount * 10 // Example calculation
+        val loyaltyPoints = guestsCount * 10
 
         val insertedId = BookingsTable.insertAndGetId {
-            it[BookingsTable.clubId] = ClubsTable.id.entityId(clubId)
-            it[BookingsTable.tableId] = TablesTable.id.entityId(tableId)
-            it[BookingsTable.userId] = UsersTable.id.entityId(userId)
+            it[BookingsTable.clubId] = EntityID(clubId, ClubsTable)
+            it[BookingsTable.tableId] = EntityID(tableId, TablesTable)
+            it[BookingsTable.userId] = EntityID(userId, UsersTable)
             it[BookingsTable.guestsCount] = guestsCount
             it[BookingsTable.dateStart] = dateStart
             it[BookingsTable.dateEnd] = dateEnd
-            it[BookingsTable.status] = BookingStatus.NEW // Default status
+            it[BookingsTable.status] = BookingStatus.NEW
             it[BookingsTable.comment] = comment
             it[BookingsTable.guestName] = guestName
             it[BookingsTable.guestPhone] = guestPhone
             it[BookingsTable.loyaltyPointsEarned] = loyaltyPoints
-            // createdAt is clientDefault
-            it[BookingsTable.updatedAt] = LocalDateTime.now() // Set initial updated_at
+            it[BookingsTable.updatedAt] = LocalDateTime.now()
         }.value
 
-        // Update user's total loyalty points
         usersRepo.updateLoyaltyPoints(userId, loyaltyPoints)
-
         Pair(insertedId, loyaltyPoints)
     }
 
@@ -86,7 +80,7 @@ class BookingsRepoImpl(
 
     override suspend fun findAllByUserId(userId: Int): List<Booking> = newSuspendedTransaction {
         BookingsTable
-            .select { BookingsTable.userId eq UsersTable.id.entityId(userId) } // Compare with EntityID<Int>
+            .select { BookingsTable.userId eq EntityID(userId, UsersTable) }
             .orderBy(BookingsTable.createdAt, SortOrder.DESC)
             .map { it.toBooking() }
     }
@@ -108,20 +102,19 @@ class BookingsRepoImpl(
         periodEnd: LocalDateTime
     ): Boolean = newSuspendedTransaction {
         BookingsTable.select {
-            (BookingsTable.tableId eq TablesTable.id.entityId(tableId)) and
+            (BookingsTable.tableId eq EntityID(tableId, TablesTable)) and
                     (BookingsTable.status neq BookingStatus.CANCELLED) and
-                    (BookingsTable.status neq BookingStatus.ARCHIVED) and // Also exclude archived
-                    // Interval overlap condition: (StartA < EndB) and (EndA > StartB)
-                    (BookingsTable.dateStart less periodEnd) and // Booking starts before requested period ends
-                    (BookingsTable.dateEnd greater periodStart)    // Booking ends after requested period starts
-        }.empty() // True if no such bookings exist (i.e., table is available)
+                    (BookingsTable.status neq BookingStatus.ARCHIVED) and
+                    (BookingsTable.dateStart less periodEnd) and
+                    (BookingsTable.dateEnd greater periodStart)
+        }.empty()
     }
 
     override suspend fun create(booking: Booking): Booking = newSuspendedTransaction {
         val id = BookingsTable.insertAndGetId {
-            it[clubId] = ClubsTable.id.entityId(booking.clubId)
-            it[tableId] = TablesTable.id.entityId(booking.tableId)
-            it[userId] = UsersTable.id.entityId(booking.userId)
+            it[clubId] = EntityID(booking.clubId, ClubsTable)
+            it[tableId] = EntityID(booking.tableId, TablesTable)
+            it[userId] = EntityID(booking.userId, UsersTable)
             it[guestsCount] = booking.guestsCount
             it[dateStart] = booking.dateStart
             it[dateEnd] = booking.dateEnd
@@ -130,14 +123,13 @@ class BookingsRepoImpl(
             it[guestName] = booking.guestName
             it[guestPhone] = booking.guestPhone
             it[loyaltyPointsEarned] = booking.loyaltyPointsEarned
-            // createdAt uses clientDefault if not provided by booking object
-            if (booking.createdAt != null) it[createdAt] = booking.createdAt // Or rely on clientDefault
+            it[createdAt] = booking.createdAt
             it[updatedAt] = booking.updatedAt ?: LocalDateTime.now()
         }
         findById(id.value)!!
     }
 
-    override suspend fun findAll(): List<Booking> = newSuspendedTransaction { // For RepositoriesTest
+    override suspend fun findAll(): List<Booking> = newSuspendedTransaction {
         BookingsTable.selectAll().map { it.toBooking() }
     }
 }
