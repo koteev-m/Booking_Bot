@@ -29,8 +29,8 @@ dependencies {
 
     // ——————————————————————————————————————————————
     // KStateMachine core и корутины, версия 0.33.0  [oai_citation:1‡mvnrepository.com](https://mvnrepository.com/artifact/io.github.nsk90/kstatemachine?utm_source=chatgpt.com) [oai_citation:2‡mvnrepository.com](https://mvnrepository.com/artifact/io.github.nsk90/kstatemachine-coroutines?utm_source=chatgpt.com)
-    implementation("io.github.nsk90:kstatemachine:0.33.0")
-    implementation("io.github.nsk90:kstatemachine-coroutines:0.33.0")
+//    implementation("io.github.nsk90:kstatemachine:0.33.0")
+//    implementation("io.github.nsk90:kstatemachine-coroutines:0.33.0")
 
     // Kotlin Telegram Bot из JitPack, версия 6.3.0  [oai_citation:3‡mvnrepository.com](https://mvnrepository.com/artifact/com.github.kotlin-telegram-bot/kotlin-telegram-bot?utm_source=chatgpt.com)
     implementation("com.github.kotlin-telegram-bot:kotlin-telegram-bot:6.3.0")
@@ -40,6 +40,16 @@ dependencies {
     testImplementation("io.mockk:mockk:1.13.10")
     testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.8.0")
     testImplementation("com.h2database:h2:2.2.224")
+
+    testImplementation("org.junit.jupiter:junit-jupiter:5.10.2")
+    testImplementation("org.testcontainers:junit-jupiter:1.21.1")
+    // Принудительно используем новую commons-compress, чтобы перекрыть транзитивную
+    implementation("org.apache.commons:commons-compress:1.26.0")
+    testImplementation("org.testcontainers:postgresql:1.19.7")
+    testImplementation("io.mockk:mockk:1.13.10")
+    testImplementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.6.3")
+    implementation("io.github.cdimascio:dotenv-kotlin:6.4.1")
+    implementation(kotlin("test"))
 }
 
 kotlin {
