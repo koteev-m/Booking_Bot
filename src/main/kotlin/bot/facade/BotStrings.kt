@@ -3,9 +3,9 @@ package bot.facade
 import java.time.Month
 import java.time.format.TextStyle
 import java.util.Locale
-import db.BookingStatus
+import db.BookingStatus // Assuming BookingStatus is in db package
 
-// Интерфейс для строк, чтобы легко добавлять новые языки
+// ... (interface LocalizedStrings remains the same) ...
 interface LocalizedStrings {
     val languageCode: String
     val languageName: String
@@ -110,10 +110,11 @@ interface LocalizedStrings {
     fun calendarMonthYear(month: Month, year: Int): String // Takes java.time.Month
     val weekdaysShort: List<String> // Пн, Вт, Ср...
 
-    fun chooseTablePromptForClubAndDate(clubTitle: String, formattedDate: String): String // Новая строка
-    val notApplicable: String // Новая строка (для случаев, когда данные отсутствуют)
-    fun bookingStatusToText(status: BookingStatus): String // Новая строка (для отображения статуса)
+    fun chooseTablePromptForClubAndDate(clubTitle: String, formattedDate: String): String
+    val notApplicable: String
+    fun bookingStatusToText(status: BookingStatus): String
 }
+
 
 object RussianStrings : LocalizedStrings {
     override val languageCode = BotConstants.RUSSIAN_LANGUAGE_CODE
@@ -272,10 +273,14 @@ object RussianStrings : LocalizedStrings {
 
     override fun bookingStatusToText(status: BookingStatus): String {
         return when (status) {
-            BookingStatus.NEW       -> "Новая"
-            BookingStatus.PENDING   -> "В обработке"
+            BookingStatus.NEW -> "Новая"
+            // BookingStatus.PENDING -> "В обработке" // PENDING was removed
             BookingStatus.CONFIRMED -> "Подтверждена"
             BookingStatus.CANCELLED -> "Отменена"
+            BookingStatus.COMPLETED -> "Завершена"
+            BookingStatus.AWAITING_FEEDBACK -> "Ожидает отзыва"
+            BookingStatus.ARCHIVED -> "В архиве"
+            // else -> "Неизвестный статус" // Optional: for safety if new statuses are added without updating strings
         }
     }
 }
@@ -446,17 +451,19 @@ object EnglishStrings : LocalizedStrings {
 
     override fun bookingStatusToText(status: BookingStatus): String {
         return when (status) {
-            BookingStatus.NEW       -> "New"
-            BookingStatus.PENDING   -> "Pending"
+            BookingStatus.NEW -> "New"
+            // BookingStatus.PENDING -> "Pending" // PENDING was removed
             BookingStatus.CONFIRMED -> "Confirmed"
             BookingStatus.CANCELLED -> "Cancelled"
+            BookingStatus.COMPLETED -> "Completed"
+            BookingStatus.AWAITING_FEEDBACK -> "Awaiting Feedback"
+            BookingStatus.ARCHIVED -> "Archived"
+            // else -> "Unknown Status" // Optional
         }
     }
 }
 
-/**
- * Фабрика провайдеров строк для разных языков.
- */
+
 object StringProviderFactory {
     private val providers = mapOf(
         BotConstants.RUSSIAN_LANGUAGE_CODE to RussianStrings,
@@ -464,7 +471,7 @@ object StringProviderFactory {
     )
 
     fun get(languageCode: String?): LocalizedStrings {
-        return providers[languageCode?.lowercase()] ?: providers[BotConstants.RUSSIAN_LANGUAGE_CODE]!!
+        return providers[languageCode?.lowercase()] ?: providers[BotConstants.DEFAULT_LANGUAGE_CODE]!! // Fallback to default
     }
 
     fun allLanguages(): List<LocalizedStrings> = providers.values.toList()

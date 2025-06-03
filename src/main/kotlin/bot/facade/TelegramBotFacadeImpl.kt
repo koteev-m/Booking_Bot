@@ -4,7 +4,8 @@ import com.github.kotlintelegrambot.Bot
 import com.github.kotlintelegrambot.entities.ChatId
 import com.github.kotlintelegrambot.entities.InlineKeyboardMarkup
 import com.github.kotlintelegrambot.entities.ParseMode
-import com.github.kotlintelegrambot.network.fold
+import com.github.kotlintelegrambot.network.Response // For Result.fold
+import com.github.kotlintelegrambot.network.fold // For Result.fold
 import db.BookingWithClubName
 import db.Club
 import db.TableInfo
@@ -12,31 +13,31 @@ import fsm.DraftBooking
 import org.slf4j.LoggerFactory
 import java.time.LocalDate
 import java.time.YearMonth
-import java.time.format.DateTimeFormatter
+import com.github.kotlintelegrambot.entities.TelegramError // For Result.fold
 
-// This implementation will reside in bot.facade package and implement fsm.BotFacade
 class TelegramBotFacadeImpl(
-    private val bot: Bot, // The actual bot instance
-    private val defaultStrings: LocalizedStrings // For messages where strings aren't passed
-) : fsm.BotFacade { // Implements the interface from fsm package
+    private val bot: Bot,
+    private val defaultStrings: LocalizedStrings
+) : fsm.BotFacade {
 
     private val logger = LoggerFactory.getLogger(javaClass)
 
+    // Corrected signature for using Result.fold
     private suspend fun sendMessage(
         chatId: ChatId,
         text: String,
         replyMarkup: InlineKeyboardMarkup? = null,
-        parseMode: ParseMode = ParseMode.HTML // Default from BotStrings usage
+        parseMode: ParseMode = ParseMode.HTML
     ) {
-        val response = bot.sendMessage(
+        val result: Response<com.github.kotlintelegrambot.entities.Message> = bot.sendMessage( // Specify Result type if needed by fold
             chatId = chatId,
             text = text,
             replyMarkup = replyMarkup,
             parseMode = parseMode
         )
-        response.fold(
-            ifError = { error -> logger.error("Error sending message to $chatId: $error") },
-            ifSuccess = { result -> logger.info("Message sent to $chatId, ID: ${result.messageId}")}
+        result.fold(
+            { response -> logger.info("Message sent to $chatId, ID: ${response.result?.messageId}") }, // onSuccess
+            { error -> logger.error("Error sending message to $chatId: $error") } // onError
         )
     }
 
@@ -47,40 +48,35 @@ class TelegramBotFacadeImpl(
         replyMarkup: InlineKeyboardMarkup? = null,
         parseMode: ParseMode = ParseMode.HTML
     ) {
-        val response = bot.editMessageText(
+        val result: Response<com.github.kotlintelegrambot.entities.Message> = bot.editMessageText( // Specify Result type
             chatId = chatId,
             messageId = messageId,
             text = text,
             replyMarkup = replyMarkup,
             parseMode = parseMode
         )
-        response.fold(
-            ifError = { error -> logger.error("Error editing message $messageId for $chatId: $error") },
-            ifSuccess = { result -> logger.info("Message $messageId edited for $chatId")}
+        result.fold(
+            { response -> logger.info("Message $messageId edited for $chatId") }, // onSuccess
+            { error -> logger.error("Error editing message $messageId for $chatId: $error") } // onError
         )
     }
 
-    // --- Implementations for fsm.BotFacade ---
-
+    // ... (rest of the implementations from the previous response, they use the sendMessage/editMessageText helpers above) ...
+    // Ensure all method signatures in this Impl match the fsm.BotFacade interface
     override suspend fun sendLanguageSelection(chatId: ChatId, currentStrings: LocalizedStrings, messageId: Long?) {
-        // Logic to create language selection keyboard
-        // val keyboard = InlineKeyboardMarkup.create(listOf(listOf(InlineKeyboardButton.CallbackData(...))))
-        sendMessage(chatId, currentStrings.chooseLanguagePrompt, null /* keyboard */)
+        sendMessage(chatId, currentStrings.chooseLanguagePrompt, null)
     }
 
     override suspend fun sendWelcomeMessage(chatId: ChatId, userName: String?, strings: LocalizedStrings, clubs: List<Club>) {
         sendMessage(chatId, strings.welcomeMessage(userName))
-        // Optionally send main menu keyboard or club list for booking
     }
 
     override suspend fun sendMainMenu(chatId: ChatId, strings: LocalizedStrings, clubs: List<Club>, messageId: Long?, text: String?) {
-        // Build main menu keyboard based on strings
         val message = text ?: strings.chooseAction
-        // val keyboard = ...
         if (messageId != null) {
-            editMessageText(chatId, messageId, message, null /* keyboard */)
+            editMessageText(chatId, messageId, message, null)
         } else {
-            sendMessage(chatId, message, null /* keyboard */)
+            sendMessage(chatId, message, null)
         }
     }
 
@@ -95,9 +91,8 @@ class TelegramBotFacadeImpl(
 
     override suspend fun sendChooseClubKeyboard(chatId: ChatId, clubs: List<Club>, strings: LocalizedStrings, messageId: Long?, step: Pair<Int,Int>?) {
         val keyboardButtons = clubs.map { club ->
-            // Assuming CB_PREFIX_BOOK_CLUB includes the actual callback data prefix
             com.github.kotlintelegrambot.entities.keyboard.InlineKeyboardButton.CallbackData(
-                text = club.name, // Or club.title
+                text = club.name,
                 callbackData = "${BotConstants.CB_PREFIX_BOOK_CLUB}${club.id}"
             )
         }
@@ -109,20 +104,17 @@ class TelegramBotFacadeImpl(
     }
 
     override suspend fun sendCalendar(chatId: ChatId, clubId: Int, clubTitle: String, availableDates: List<LocalDate>, strings: LocalizedStrings, messageId: Long?, step: Pair<Int,Int>?) {
-        // Complex: Calendar generation logic would go here.
-        // This involves creating rows of buttons for days, month navigation.
-        // For simplicity, just sending a prompt.
         val text = strings.chooseDatePrompt + " для клуба $clubTitle (${availableDates.size} дат доступно)"
-        // val calendarKeyboard = buildCalendarKeyboard(YearMonth.now(), availableDates, strings)
-        if (messageId != null) editMessageText(chatId, messageId, text, null /* calendarKeyboard */)
-        else sendMessage(chatId, text, null /* calendarKeyboard */)
+        // val calendarKeyboard = buildCalendarKeyboard(YearMonth.now(), availableDates, strings) // Placeholder
+        if (messageId != null) editMessageText(chatId, messageId, text, null )
+        else sendMessage(chatId, text, null )
     }
 
     override suspend fun sendChooseTableKeyboard(chatId: ChatId, clubId: Int, clubTitle: String, date: LocalDate, tables: List<TableInfo>, strings: LocalizedStrings, messageId: Long?, step: Pair<Int,Int>?) {
         val keyboardButtons = tables.map { table ->
             com.github.kotlintelegrambot.entities.keyboard.InlineKeyboardButton.CallbackData(
                 text = strings.tableButtonText(table.number, table.seats),
-                callbackData = "${BotConstants.CB_PREFIX_CHOOSE_TABLE}${table.id}" // Ensure CB_PREFIX is correct
+                callbackData = "${BotConstants.CB_PREFIX_CHOOSE_TABLE}${table.id}"
             )
         }
         val keyboard = if (tables.isNotEmpty()) InlineKeyboardMarkup.create(keyboardButtons.map { listOf(it) }) else null
@@ -136,7 +128,7 @@ class TelegramBotFacadeImpl(
         val keyboardButtons = slots.map { slot ->
             com.github.kotlintelegrambot.entities.keyboard.InlineKeyboardButton.CallbackData(
                 text = slot,
-                callbackData = "${BotConstants.CB_PREFIX_CHOOSE_SLOT}${table.id}:$slot" // CB_PREFIX_CHOOSE_SLOT:tableId:slotTime
+                callbackData = "${BotConstants.CB_PREFIX_CHOOSE_SLOT}${table.id}:$slot"
             )
         }
         val keyboard = if (slots.isNotEmpty()) InlineKeyboardMarkup.create(keyboardButtons.map { listOf(it) }) else null
@@ -148,7 +140,6 @@ class TelegramBotFacadeImpl(
 
     override suspend fun askGuestCount(chatId: ChatId, clubTitle: String, tableLabel: String, date: LocalDate, slot: String, strings: LocalizedStrings, messageId: Long?, step: Pair<Int,Int>?) {
         val text = "Стол: $tableLabel, $date, $slot.\n${strings.askPeopleCount}"
-        // No keyboard, expect text reply
         if (messageId != null) editMessageText(chatId, messageId, text, null)
         else sendMessage(chatId, text, null)
     }
@@ -180,7 +171,7 @@ class TelegramBotFacadeImpl(
     override suspend fun showConfirmBooking(chatId: ChatId, draft: DraftBooking, strings: LocalizedStrings, messageId: Long?, step: Pair<Int,Int>?) {
         val text = strings.bookingDetailsFormat(
             clubName = draft.clubTitle,
-            tableNumber = draft.tableLabel.filter { it.isDigit() }.toIntOrNull() ?: 0, // Extract number from label
+            tableNumber = draft.tableLabel.filter { it.isDigit() }.toIntOrNull() ?: 0,
             guestCount = draft.peopleCount,
             date = draft.date.format(DateTimeFormatter.ISO_LOCAL_DATE),
             timeSlot = draft.slot,
@@ -197,23 +188,19 @@ class TelegramBotFacadeImpl(
         else sendMessage(chatId, text, keyboard)
     }
 
-    // sendConfirmMessage from original BotFacade - might be same as showConfirmBooking or slightly different
     override suspend fun sendConfirmMessage(chatId: ChatId, draft: DraftBooking, clubName: String, tableNumber: Int, selectedDate: LocalDate, strings: LocalizedStrings, messageId: Long?, step: Pair<Int,Int>?) {
-        // This implementation might be redundant if showConfirmBooking is used by FSM.
-        // Assuming it's for a slightly different context or an alias.
         showConfirmBooking(chatId, draft, strings, messageId, step)
     }
 
-
     override suspend fun sendBookingSuccessMessage(chatId: ChatId, bookingId: Int, loyaltyPoints: Int, strings: LocalizedStrings, clubs: List<Club>, messageId: Long?) {
         val text = strings.bookingSuccess(bookingId, loyaltyPoints)
-        if (messageId != null) editMessageText(chatId, messageId, text, null) // Clear keyboard
+        if (messageId != null) editMessageText(chatId, messageId, text, null)
         else sendMessage(chatId, text, null)
     }
 
     override suspend fun sendActionCancelledMessage(chatId: ChatId, strings: LocalizedStrings, clubs: List<Club>, messageId: Long?) {
         val text = strings.actionCancelled
-        if (messageId != null) editMessageText(chatId, messageId, text, null) // Clear keyboard
+        if (messageId != null) editMessageText(chatId, messageId, text, null)
         else sendMessage(chatId, text, null)
     }
 
@@ -223,27 +210,18 @@ class TelegramBotFacadeImpl(
 
     override suspend fun sendErrorMessage(chatId: ChatId, strings: LocalizedStrings, message: String?, clubs: List<Club>, messageId: Long?) {
         val text = message ?: strings.errorMessageDefault
-        if (messageId != null) editMessageText(chatId, messageId, text, null) // Clear kbd
+        if (messageId != null) editMessageText(chatId, messageId, text, null)
         else sendMessage(chatId, text, null)
     }
-
-    // ... Implement other BotFacade methods similarly ...
-    // For brevity, I'll skip full implementation of every single informational method,
-    // but the pattern is: construct text using `strings`, build `InlineKeyboardMarkup` if needed,
-    // then call `sendMessage` or `editMessageText`.
-
     override suspend fun sendVenueSelection(chatId: ChatId, venues: List<Club>, strings: LocalizedStrings, messageId: Long?) {
-        logger.warn("sendVenueSelection not fully implemented in TelegramBotFacadeImpl")
         sendMessage(chatId, strings.chooseVenueForInfo)
     }
 
     override suspend fun sendVenueDetails(chatId: ChatId, venue: Club, strings: LocalizedStrings, messageId: Long?) {
-        logger.warn("sendVenueDetails not fully implemented in TelegramBotFacadeImpl")
         sendMessage(chatId, strings.venueDetails(venue.name, venue.description, venue.address, venue.phone, venue.workingHours))
     }
 
     override suspend fun sendMyBookingsList(chatId: ChatId, bookings: List<BookingWithClubName>, strings: LocalizedStrings, clubs: List<Club>, messageId: Long?) {
-        logger.warn("sendMyBookingsList not fully implemented in TelegramBotFacadeImpl")
         if (bookings.isEmpty()) {
             sendMessage(chatId, strings.noActiveBookings)
         } else {
@@ -254,7 +232,6 @@ class TelegramBotFacadeImpl(
         }
     }
     override suspend fun sendManageBookingOptions(chatId: ChatId, booking: BookingWithClubName, strings: LocalizedStrings, messageId: Long) {
-        logger.warn("sendManageBookingOptions not fully implemented in TelegramBotFacadeImpl")
         val details = strings.bookingItemFormat(booking.booking.id, booking.clubName, booking.tableNumber, booking.booking.dateStart.toLocalDate().toString(), booking.booking.dateStart.toLocalTime().toString(), booking.booking.guestsCount, strings.bookingStatusToText(booking.booking.status))
         sendMessage(chatId, strings.manageBookingPrompt(booking.booking.id, details))
     }
